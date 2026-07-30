@@ -1,0 +1,10 @@
+{
+  "name": "JSOS · Japanese Speaking OS",
+  "short_name": "JSOS",
+  "description": "以真实对话为中心的日语训练操作系统",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#f5f3ec",
+  "theme_color": "#1c5137",
+  "icons": [{ "src": "/favicon.svg", "sizes": "any", "type": "image/svg+xml" }]
+}
