@@ -24,5 +24,6 @@ test("server-renders the private login page", async () => {
   assert.equal(response.status, 200);
   const html = await response.text();
   assert.match(html, /登录 JSOS/);
-  assert.match(html, /首版仅对已授权账号开放/);
+  assert.match(html, /暂未开放注册/);
+  assert.match(html, />JSOS<\/span>/);
 });

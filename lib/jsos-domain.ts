@@ -33,6 +33,7 @@ export function validateSummary(input: unknown): { ok: true; data: JsosSummary }
   if (value.schemaVersion !== "1.0") errors.push("schemaVersion 必须为 1.0");
   if (value.rubricVersion !== "1.0") errors.push("rubricVersion 必须为 1.0");
   if (!value.task?.taskId) errors.push("缺少 taskId");
+  if (value.session?.completed !== true) errors.push("session.completed 必须为 true");
   for (const key of SCORE_KEYS) {
     const score = value.scores?.[key]?.score;
     if (score !== null && (typeof score !== "number" || score < 1 || score > 5)) errors.push(`${key} 评分必须为 1–5 或 null`);

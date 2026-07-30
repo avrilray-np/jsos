@@ -38,7 +38,6 @@ export default function LoginPage() {
       <section className="login-card">
         <span className="eyebrow">Private beta</span>
         <h2>登录 JSOS</h2>
-        <p>首版仅对已授权账号开放。</p>
         <form onSubmit={handleSubmit}>
           <label>邮箱<input name="email" type="email" placeholder="name@example.com" autoComplete="email" required /></label>
           <label>密码<input name="password" type="password" placeholder="至少 8 位" autoComplete="current-password" required minLength={8} /></label>

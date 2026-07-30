@@ -44,6 +44,7 @@ export default function Home() {
   const [summaryOpen, setSummaryOpen] = useState(false);
   const [summary, setSummary] = useState("");
   const [summaryMessage, setSummaryMessage] = useState("");
+  const [summaryImporting, setSummaryImporting] = useState(false);
   const [checks, setChecks] = useState({ anki: false, shadowing: false, monologue: false, writing: false });
   const [toast, setToast] = useState("");
   const [vocabulary, setVocabulary] = useState<VocabularyItem[]>([]);
@@ -92,9 +93,12 @@ export default function Home() {
     return () => window.removeEventListener("popstate", handlePopState);
   }, []);
 
-  const current = useMemo(() => tasks.find((task) => task.status === "today") ?? tasks.find((task) => task.status === "planned") ?? null, [tasks]);
+  const current = useMemo(() => {
+    const today = new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Shanghai" });
+    return tasks.find((task) => task.date === today) ?? tasks.find((task) => task.status === "planned") ?? null;
+  }, [tasks]);
   const nextTask = useMemo(() => current ? tasks.find((task) => (task.day ?? 0) > (current.day ?? 0)) ?? null : null, [current, tasks]);
-  const completed = tasks.filter((task) => task.status === "done").length + (taskComplete ? 1 : 0);
+  const completed = tasks.filter((task) => task.status === "done").length;
   const progress = Math.round((completed / 40) * 100);
   const vocabularyNewCount = vocabulary.filter((item) => item.state === "生词").length;
   const vocabularyKnownCount = vocabulary.filter((item) => item.state === "熟词").length;
@@ -215,24 +219,33 @@ export default function Home() {
     }
   }
 
-  function importSummary() {
+  async function importSummary() {
     if (!summary.trim()) {
       setSummaryMessage("请先粘贴 ChatGPT 生成的总结");
       return;
     }
+    setSummaryImporting(true);
+    setSummaryMessage("");
     try {
       const parsed = JSON.parse(summary);
-      const scores = parsed?.scores;
-      const validScore = (value: unknown) => value === null || (typeof value === "number" && value >= 1 && value <= 5);
-      if (!parsed.task?.taskId || !validScore(scores?.communication?.score) || !validScore(scores?.fluency?.score) || !validScore(scores?.pronunciation?.score)) {
-        throw new Error("invalid summary");
+      const response = await fetch("/api/summaries", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(parsed),
+      });
+      const data = await response.json() as { ok?: boolean; message?: string };
+      if (response.status === 401) {
+        window.location.replace("/login");
+        return;
       }
+      if (!response.ok || !data.ok) throw new Error(data.message ?? "总结未通过验证");
       setTaskComplete(true);
-      setSummaryMessage("总结已验证并导入，学习记录已更新");
-      setChecks((previous) => ({ ...previous, anki: true }));
-      setTasks((previous) => previous.map((task) => task.status === "today" ? { ...task, status: "done" } : task));
-    } catch {
-      setSummaryMessage("总结格式不完整，可重新复制或稍后使用 AI 修复");
+      setSummaryMessage("总结已保存，任务、评分、单词和句子均已更新");
+      await loadDashboard();
+    } catch (error) {
+      setSummaryMessage(error instanceof Error ? error.message : "总结格式不完整或保存失败");
+    } finally {
+      setSummaryImporting(false);
     }
   }
 
@@ -284,7 +297,7 @@ export default function Home() {
       </header>
 
       {view === "calendar" && <CalendarView tasks={tasks} activePlan={activePlan} loading={dashboardLoading} message={dashboardMessage} month={calendarMonth} progress={progress} expressionCount={expressionCount} vocabularyCounts={[vocabularyNewCount, vocabularyKnownCount]} sentenceCounts={[sentenceLearningCount, sentenceMasteredCount]} onTask={() => navigate("task")} onNavigate={navigate} onMonthChange={setCalendarMonth} onOpenSettings={openPlanSettings} />}
-      {view === "task" && current && <TaskView current={current} nextTask={nextTask} complete={taskComplete} copied={copied} checks={checks} onOpenPrompt={() => setPromptOpen(true)} onOpenSummary={() => setSummaryOpen(true)} onCheck={(key) => setChecks((previous) => ({ ...previous, [key]: !previous[key] }))} onNavigate={navigate} onBack={goBack} />}
+      {view === "task" && current && <TaskView current={current} nextTask={nextTask} complete={taskComplete || current.status === "done"} copied={copied} checks={checks} onOpenPrompt={() => setPromptOpen(true)} onOpenSummary={() => setSummaryOpen(true)} onCheck={(key) => setChecks((previous) => ({ ...previous, [key]: !previous[key] }))} onNavigate={navigate} onBack={goBack} />}
       {view === "vocabulary" && <VocabularyView items={vocabulary} counts={[vocabularyNewCount, vocabularyKnownCount]} onToggle={toggleVocabulary} onBack={goBack} />}
       {view === "sentences" && <SentencesView items={sentences} counts={[sentenceLearningCount, sentenceMasteredCount]} onToggle={toggleSentence} onBack={goBack} />}
       {view === "anki" && <AnkiView items={vocabulary} completed={ankiCompleted} onToggle={toggleAnki} onNotify={notify} onBack={goBack} />}
@@ -299,10 +312,10 @@ export default function Home() {
             </div>
             <p>系统会先检查任务编号、版本和三项评分；合法数据会直接保存。</p>
             <textarea value={summary} onChange={(event) => setSummary(event.target.value)} placeholder='粘贴以 { "schemaVersion": "1.0" } 开头的 JSON…' />
-            {summaryMessage && <div className={summaryMessage.includes("已验证") ? "message success" : "message"}>{summaryMessage}</div>}
+            {summaryMessage && <div className={summaryMessage.includes("已保存") ? "message success" : "message"}>{summaryMessage}</div>}
             <div className="modal-actions">
               <button className="button secondary" onClick={() => setSummaryOpen(false)}>稍后处理</button>
-              <button className="button primary" onClick={importSummary}>验证并导入</button>
+              <button className="button primary" disabled={summaryImporting} onClick={importSummary}>{summaryImporting ? "正在保存…" : "验证并导入"}</button>
             </div>
           </section>
         </div>

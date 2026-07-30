@@ -1,17 +1,16 @@
-const BEIJING_TIME_ZONE = "Asia/Shanghai";
+import { supabaseAdmin } from "../../../../lib/supabase-rest";
 
 export async function GET(request: Request) {
   const secret = request.headers.get("authorization");
   const expected = process.env.CRON_SECRET;
-  if (expected && secret !== `Bearer ${expected}`) return Response.json({ ok: false, error: "unauthorized" }, { status: 401 });
+  if (!expected || secret !== `Bearer ${expected}`) return Response.json({ ok: false, error: "unauthorized" }, { status: 401 });
 
-  // The production handler runs the same idempotent state transition inside a
-  // database transaction: defer missed work, insert recommendations, renumber
-  // only future tasks, generate missing content, then record the job outcome.
-  return Response.json({
-    ok: true,
-    mode: process.env.SUPABASE_URL ? "configured" : "setup-required",
-    timezone: BEIJING_TIME_ZONE,
-    actions: ["defer-missed-task", "apply-user-schedule-overrides", "insert-reinforcement", "renumber-future-days", "generate-missing-tasks"],
+  const response = await supabaseAdmin("rpc/run_jsos_daily_rollover", {
+    method: "POST",
+    body: JSON.stringify({ p_today: null }),
   });
+  if (!response.ok) return Response.json({ ok: false, error: "daily rollover failed" }, { status: 502 });
+  return Response.json({ ok: true, timezone: "Asia/Shanghai", result: await response.json() });
 }
+
+export const POST = GET;
