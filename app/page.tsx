@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { parseSummaryText, validateSummary } from "../lib/jsos-domain";
 
 type View = "calendar" | "task" | "vocabulary" | "sentences" | "anki" | "review";
 type TaskStatus = "done" | "today" | "planned" | "deferred";
@@ -15,9 +16,12 @@ type CalendarTask = {
   content?: { scenes?: Array<{ key?: string; title?: string; goals?: string[]; roles?: string[] }>; targetPatterns?: string[]; basePrompt?: string | null };
 };
 
-type VocabularyItem = { word: string; reading: string; meaning: string; state: "生词" | "熟词"; source: string };
-type SentenceItem = { original: string; corrected: string; note: string; state: "待掌握" | "已掌握" };
+type VocabularyItem = { id: string; word: string; reading: string; meaning: string; state: "生词" | "熟词"; source: string; sessionIds: string[] };
+type SentenceItem = { sessionId: string; original: string; corrected: string; note: string; state: "待掌握" | "已掌握" };
 type PlanRun = { id: string; kind: "trial" | "official"; status: "active" | "archived"; starts_on: string; activated_at: string; archived_at: string | null };
+type CheckKey = "anki" | "shadowing" | "monologue" | "writing";
+type DailyChecks = Record<CheckKey, boolean>;
+type TrainingSession = { id: string; task_id: string; duration_minutes: number | null; communication_score: number | null; fluency_score: number | null; pronunciation_score: number | null; summary_zh: string | null; needs_reinforcement: boolean; recommendation: { reasonZh?: string; suggestedFocus?: string[] } | null; imported_at: string };
 
 type DashboardResponse = {
   ok?: boolean;
@@ -25,8 +29,11 @@ type DashboardResponse = {
   activePlan?: PlanRun | null;
   tasks?: Array<{ id: string; day_number: number; topic: string; task_type: string; status: string; scheduled_for: string; content?: CalendarTask["content"] }>;
   calendar?: Array<{ calendar_date: string; state: string; task_id: string | null }>;
-  vocabulary?: Array<{ word: string; reading: string | null; meaning_zh: string; status: string }>;
-  sentences?: Array<{ original: string; corrected: string; explanation_zh: string | null; status: string }>;
+  vocabulary?: Array<{ id: string; word: string; reading: string | null; meaning_zh: string; status: string }>;
+  vocabularySources?: Array<{ vocabulary_id: string; session_id: string }>;
+  sentences?: Array<{ session_id: string; original: string; corrected: string; explanation_zh: string | null; status: string }>;
+  sessions?: TrainingSession[];
+  checkins?: Array<{ check_date: string } & DailyChecks>;
   stats?: { completed: number; expressions: number };
 };
 
@@ -38,6 +45,7 @@ export default function Home() {
   const [dashboardLoading, setDashboardLoading] = useState(true);
   const [dashboardMessage, setDashboardMessage] = useState("");
   const [calendarMonth, setCalendarMonth] = useState("");
+  const [selectedTaskId, setSelectedTaskId] = useState("");
   const [taskComplete, setTaskComplete] = useState(false);
   const [copied, setCopied] = useState(false);
   const [promptOpen, setPromptOpen] = useState(false);
@@ -45,10 +53,11 @@ export default function Home() {
   const [summary, setSummary] = useState("");
   const [summaryMessage, setSummaryMessage] = useState("");
   const [summaryImporting, setSummaryImporting] = useState(false);
-  const [checks, setChecks] = useState({ anki: false, shadowing: false, monologue: false, writing: false });
+  const [checkins, setCheckins] = useState<Record<string, DailyChecks>>({});
   const [toast, setToast] = useState("");
   const [vocabulary, setVocabulary] = useState<VocabularyItem[]>([]);
   const [sentences, setSentences] = useState<SentenceItem[]>([]);
+  const [sessions, setSessions] = useState<TrainingSession[]>([]);
   const [expressionCount, setExpressionCount] = useState(0);
   const [ankiCompleted, setAnkiCompleted] = useState<string[]>([]);
   const [reviewCompleted, setReviewCompleted] = useState<number[]>([]);
@@ -95,9 +104,13 @@ export default function Home() {
 
   const current = useMemo(() => {
     const today = new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Shanghai" });
-    return tasks.find((task) => task.date === today) ?? tasks.find((task) => task.status === "planned") ?? null;
-  }, [tasks]);
+    return tasks.find((task) => task.taskId === selectedTaskId) ?? tasks.find((task) => task.date === today) ?? tasks.find((task) => task.status === "planned") ?? null;
+  }, [selectedTaskId, tasks]);
   const nextTask = useMemo(() => current ? tasks.find((task) => (task.day ?? 0) > (current.day ?? 0)) ?? null : null, [current, tasks]);
+  const currentSession = useMemo(() => sessions.find((session) => session.task_id === current?.taskId) ?? null, [current?.taskId, sessions]);
+  const currentChecks = current ? checkins[current.date] ?? { anki: false, shadowing: false, monologue: false, writing: false } : { anki: false, shadowing: false, monologue: false, writing: false };
+  const currentWords = currentSession ? vocabulary.filter((item) => item.sessionIds.includes(currentSession.id)) : [];
+  const currentSentences = currentSession ? sentences.filter((item) => item.sessionId === currentSession.id) : [];
   const completed = tasks.filter((task) => task.status === "done").length;
   const progress = Math.round((completed / 40) * 100);
   const vocabularyNewCount = vocabulary.filter((item) => item.state === "生词").length;
@@ -126,8 +139,12 @@ export default function Home() {
       });
       setActivePlan(data.activePlan ?? null);
       setTasks(normalized);
-      setVocabulary((data.vocabulary ?? []).map((item) => ({ word: item.word, reading: item.reading ?? "", meaning: item.meaning_zh, state: item.status === "known" ? "熟词" : "生词", source: "训练记录" })));
-      setSentences((data.sentences ?? []).map((item) => ({ original: item.original, corrected: item.corrected, note: item.explanation_zh ?? "", state: item.status === "mastered" ? "已掌握" : "待掌握" })));
+      const sessionIdsByVocabulary = new Map<string, string[]>();
+      for (const source of data.vocabularySources ?? []) sessionIdsByVocabulary.set(source.vocabulary_id, [...(sessionIdsByVocabulary.get(source.vocabulary_id) ?? []), source.session_id]);
+      setVocabulary((data.vocabulary ?? []).map((item) => ({ id: item.id, word: item.word, reading: item.reading ?? "", meaning: item.meaning_zh, state: item.status === "known" ? "熟词" : "生词", source: "训练记录", sessionIds: sessionIdsByVocabulary.get(item.id) ?? [] })));
+      setSentences((data.sentences ?? []).map((item) => ({ sessionId: item.session_id, original: item.original, corrected: item.corrected, note: item.explanation_zh ?? "", state: item.status === "mastered" ? "已掌握" : "待掌握" })));
+      setSessions(data.sessions ?? []);
+      setCheckins(Object.fromEntries((data.checkins ?? []).map((item) => [item.check_date, { anki: item.anki, shadowing: item.shadowing, monologue: item.monologue, writing: item.writing }])));
       setExpressionCount(data.stats?.expressions ?? 0);
       const firstDate = normalized[0]?.date ?? data.activePlan?.starts_on;
       if (firstDate) setCalendarMonth(firstDate.slice(0, 7));
@@ -227,7 +244,9 @@ export default function Home() {
     setSummaryImporting(true);
     setSummaryMessage("");
     try {
-      const parsed = JSON.parse(summary);
+      const parsed = parseSummaryText(summary);
+      const validation = validateSummary(parsed);
+      if (!validation.ok) throw new Error(validation.errors.join("；"));
       const response = await fetch("/api/summaries", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -240,6 +259,7 @@ export default function Home() {
       }
       if (!response.ok || !data.ok) throw new Error(data.message ?? "总结未通过验证");
       setTaskComplete(true);
+      setSummary(JSON.stringify(validation.data, null, 2));
       setSummaryMessage("总结已保存，任务、评分、单词和句子均已更新");
       await loadDashboard();
     } catch (error) {
@@ -260,7 +280,29 @@ export default function Home() {
   function toggleAnki(word: string) {
     const next = ankiCompleted.includes(word) ? ankiCompleted.filter((item) => item !== word) : [...ankiCompleted, word];
     setAnkiCompleted(next);
-    setChecks((previous) => ({ ...previous, anki: next.length === Math.min(3, vocabulary.length) }));
+    const complete = next.length === Math.min(3, vocabulary.length);
+    if (current) void saveCheckin(current.date, "anki", complete);
+  }
+
+  async function saveCheckin(date: string, key: CheckKey, value: boolean) {
+    setCheckins((previous) => ({ ...previous, [date]: { ...(previous[date] ?? { anki: false, shadowing: false, monologue: false, writing: false }), [key]: value } }));
+    try {
+      const response = await fetch("/api/checkins", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ date, key, value }) });
+      const data = await response.json() as { ok?: boolean; message?: string };
+      if (!response.ok || !data.ok) throw new Error(data.message ?? "打卡保存失败");
+    } catch (error) {
+      setCheckins((previous) => ({ ...previous, [date]: { ...(previous[date] ?? { anki: false, shadowing: false, monologue: false, writing: false }), [key]: !value } }));
+      notify(error instanceof Error ? error.message : "打卡保存失败");
+    }
+  }
+
+  function openTask(task: CalendarTask) {
+    if (!task.taskId || (task.status !== "today" && task.status !== "done")) return;
+    setSelectedTaskId(task.taskId);
+    setTaskComplete(task.status === "done");
+    setSummaryOpen(false);
+    setSummaryMessage("");
+    navigate("task");
   }
 
   function toggleReview(index: number) {
@@ -296,8 +338,8 @@ export default function Home() {
         <button className="avatar" aria-label="打开计划设置" onClick={openPlanSettings}>A</button>
       </header>
 
-      {view === "calendar" && <CalendarView tasks={tasks} activePlan={activePlan} loading={dashboardLoading} message={dashboardMessage} month={calendarMonth} progress={progress} expressionCount={expressionCount} vocabularyCounts={[vocabularyNewCount, vocabularyKnownCount]} sentenceCounts={[sentenceLearningCount, sentenceMasteredCount]} onTask={() => navigate("task")} onNavigate={navigate} onMonthChange={setCalendarMonth} onOpenSettings={openPlanSettings} />}
-      {view === "task" && current && <TaskView current={current} nextTask={nextTask} complete={taskComplete || current.status === "done"} copied={copied} checks={checks} onOpenPrompt={() => setPromptOpen(true)} onOpenSummary={() => setSummaryOpen(true)} onCheck={(key) => setChecks((previous) => ({ ...previous, [key]: !previous[key] }))} onNavigate={navigate} onBack={goBack} />}
+      {view === "calendar" && <CalendarView tasks={tasks} activePlan={activePlan} loading={dashboardLoading} message={dashboardMessage} month={calendarMonth} progress={progress} expressionCount={expressionCount} vocabularyCounts={[vocabularyNewCount, vocabularyKnownCount]} sentenceCounts={[sentenceLearningCount, sentenceMasteredCount]} onTask={openTask} onNavigate={navigate} onMonthChange={setCalendarMonth} onOpenSettings={openPlanSettings} />}
+      {view === "task" && current && <TaskView current={current} nextTask={nextTask} complete={taskComplete || current.status === "done"} copied={copied} checks={currentChecks} session={currentSession} words={currentWords} sentences={currentSentences} onOpenPrompt={() => setPromptOpen(true)} onOpenSummary={() => setSummaryOpen(true)} onCheck={(key) => void saveCheckin(current.date, key, !currentChecks[key])} onNavigate={navigate} onBack={goBack} />}
       {view === "vocabulary" && <VocabularyView items={vocabulary} counts={[vocabularyNewCount, vocabularyKnownCount]} onToggle={toggleVocabulary} onBack={goBack} />}
       {view === "sentences" && <SentencesView items={sentences} counts={[sentenceLearningCount, sentenceMasteredCount]} onToggle={toggleSentence} onBack={goBack} />}
       {view === "anki" && <AnkiView items={vocabulary} completed={ankiCompleted} onToggle={toggleAnki} onNotify={notify} onBack={goBack} />}
@@ -369,7 +411,7 @@ export default function Home() {
   );
 }
 
-function CalendarView({ tasks, activePlan, loading, message, month, progress, expressionCount, vocabularyCounts, sentenceCounts, onTask, onNavigate, onMonthChange, onOpenSettings }: { tasks: CalendarTask[]; activePlan: PlanRun | null; loading: boolean; message: string; month: string; progress: number; expressionCount: number; vocabularyCounts: [number, number]; sentenceCounts: [number, number]; onTask: () => void; onNavigate: (view: View) => void; onMonthChange: (month: string) => void; onOpenSettings: () => void }) {
+function CalendarView({ tasks, activePlan, loading, message, month, progress, expressionCount, vocabularyCounts, sentenceCounts, onTask, onNavigate, onMonthChange, onOpenSettings }: { tasks: CalendarTask[]; activePlan: PlanRun | null; loading: boolean; message: string; month: string; progress: number; expressionCount: number; vocabularyCounts: [number, number]; sentenceCounts: [number, number]; onTask: (task: CalendarTask) => void; onNavigate: (view: View) => void; onMonthChange: (month: string) => void; onOpenSettings: () => void }) {
   const effectiveMonth = month || new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Shanghai" }).slice(0, 7);
   const [year, monthNumber] = effectiveMonth.split("-").map(Number);
   const firstWeekday = (new Date(Date.UTC(year, monthNumber - 1, 1)).getUTCDay() + 6) % 7;
@@ -403,7 +445,7 @@ function CalendarView({ tasks, activePlan, loading, message, month, progress, ex
             const isoDate = day > 0 && day <= daysInMonth ? `${effectiveMonth}-${String(day).padStart(2, "0")}` : "";
             const task = taskByDate.get(isoDate);
             return isoDate ? (
-              <button key={isoDate} className={`calendar-day ${task?.status ?? "empty"} ${task?.kind ?? ""}`} onClick={task?.status === "today" ? onTask : undefined}>
+              <button key={isoDate} className={`calendar-day ${task?.status ?? "empty"} ${task?.kind ?? ""}`} onClick={task && (task.status === "today" || task.status === "done") ? () => onTask(task) : undefined}>
                 <span className="date-number">{day}日</span>
                 {task?.status === "deferred" ? <strong>已顺延</strong> : task?.topic ? <><small>Day {task.day}</small><strong><span className="desktop-topic">{task.topic}</span><span className="mobile-topic">{task.topic.replace(/\s+/g, "").slice(0, 3)}</span></strong>{task.kind === "reinforcement" && <em>补强</em>}</> : null}
               </button>
@@ -420,8 +462,8 @@ function CalendarView({ tasks, activePlan, loading, message, month, progress, ex
   );
 }
 
-function TaskView({ current, nextTask, complete, copied, checks, onOpenPrompt, onOpenSummary, onCheck, onNavigate, onBack }: {
-  current: CalendarTask; nextTask: CalendarTask | null; complete: boolean; copied: boolean; checks: Record<string, boolean>; onOpenPrompt: () => void; onOpenSummary: () => void; onCheck: (key: "anki" | "shadowing" | "monologue" | "writing") => void; onNavigate: (view: View) => void; onBack: () => void;
+function TaskView({ current, nextTask, complete, copied, checks, session, words, sentences, onOpenPrompt, onOpenSummary, onCheck, onNavigate, onBack }: {
+  current: CalendarTask; nextTask: CalendarTask | null; complete: boolean; copied: boolean; checks: DailyChecks; session: TrainingSession | null; words: VocabularyItem[]; sentences: SentenceItem[]; onOpenPrompt: () => void; onOpenSummary: () => void; onCheck: (key: CheckKey) => void; onNavigate: (view: View) => void; onBack: () => void;
 }) {
   const stage = (current.day ?? 1) <= 15 ? "第一阶段 · 高频生活" : (current.day ?? 1) <= 25 ? "第二阶段 · 社会生活" : "第三阶段 · 软件互联网工作";
   const focus = current.content?.scenes?.map((scene) => scene.title).filter((title): title is string => Boolean(title)).slice(0, 4) ?? [];
@@ -441,17 +483,17 @@ function TaskView({ current, nextTask, complete, copied, checks, onOpenPrompt, o
             </div>
           </article>
           <article className="card import-card">
-            <div className="card-number">02</div><div className="card-body"><span className="eyebrow">After live</span><h2>导入训练总结</h2><p>结束 Voice 后，复制 ChatGPT 生成的 JSON 总结，交给 JSOS 更新学习档案。</p><button className="button primary summary-import-button" onClick={onOpenSummary}>{complete ? "查看导入结果" : "粘贴训练总结"}</button></div>
+            <div className="card-number">02</div><div className="card-body"><span className="eyebrow">After live</span><h2>导入训练总结</h2><p>结束 Voice 后，复制 ChatGPT 生成的 JSON 总结，交给 JSOS 更新学习档案。</p><button className="button primary summary-import-button" onClick={onOpenSummary}>{complete ? "重新导入训练总结" : "粘贴训练总结"}</button></div>
           </article>
-          {complete && <ScoreSummary />}
+          {complete && session && <ScoreSummary session={session} words={words} sentences={sentences} />}
         </div>
         <aside className="task-aside">
           <article className="side-card"><span className="eyebrow">Review</span><h3>昨日复习</h3><p>2 个单词 · 2 个句子</p><button onClick={() => onNavigate("review")}>开始复习 <span>→</span></button></article>
-          <article className="side-card checklist"><span className="eyebrow">Daily rhythm</span><h3>今日其他训练</h3>
-            <CheckRow label="今日 Anki" checked={checks.anki} onClick={() => onNavigate("anki")} />
-            <CheckRow label="今日 Shadowing" checked={checks.shadowing} onClick={() => onCheck("shadowing")} />
-            <CheckRow label="今日独白" checked={checks.monologue} onClick={() => onCheck("monologue")} />
-            <CheckRow label="今日写作" checked={checks.writing} onClick={() => onCheck("writing")} />
+          <article className="side-card checklist"><span className="eyebrow">Daily rhythm</span><h3>当日其他训练</h3>
+            <CheckRow label="当日 Anki" checked={checks.anki} onClick={() => onNavigate("anki")} />
+            <CheckRow label="当日 Shadowing" checked={checks.shadowing} onClick={() => onCheck("shadowing")} />
+            <CheckRow label="当日独白" checked={checks.monologue} onClick={() => onCheck("monologue")} />
+            <CheckRow label="当日写作" checked={checks.writing} onClick={() => onCheck("writing")} />
           </article>
           <article className="side-card next-card"><span className="eyebrow">Next</span><h3>推荐安排</h3><strong>{nextTask ? `Day ${nextTask.day} · ${nextTask.topic}` : "当前计划最后一天"}</strong><p>系统会在北京时间凌晨 1:00 根据本次结果重新确认。</p><button>调整日期</button></article>
         </aside>
@@ -460,8 +502,9 @@ function TaskView({ current, nextTask, complete, copied, checks, onOpenPrompt, o
   );
 }
 
-function ScoreSummary() {
-  return <section className="card score-card"><div className="score-heading"><div><span className="eyebrow">Session summary</span><h2>本次训练表现</h2></div><strong>42min</strong></div><div className="score-grid">{[["传达性", 4], ["流利度", 3], ["发音", 3]].map(([label, score]) => <div key={String(label)}><span>{label}</span><strong>{score}<small>/5</small></strong><i><b style={{ width: `${Number(score) * 20}%` }} /></i></div>)}</div><div className="summary-note"><strong>下一步</strong><p>核心场景已经完成。建议三天后再安排一次餐厅随机练习，重点观察停顿和长音。</p></div></section>;
+function ScoreSummary({ session, words, sentences }: { session: TrainingSession; words: VocabularyItem[]; sentences: SentenceItem[] }) {
+  const scores: Array<[string, number | null]> = [["传达性", session.communication_score], ["流利度", session.fluency_score], ["发音", session.pronunciation_score]];
+  return <section className="card score-card"><div className="score-heading"><div><span className="eyebrow">Session summary</span><h2>本次训练表现</h2></div><strong>{session.duration_minutes ? `${session.duration_minutes}min` : "时长未记录"}</strong></div><div className="score-grid">{scores.map(([label, score]) => <div key={label}><span>{label}</span><strong>{score ?? "—"}<small>/5</small></strong><i><b style={{ width: `${(score ?? 0) * 20}%` }} /></i></div>)}</div><div className="summary-note"><strong>{session.needs_reinforcement ? "建议补强" : "今日总结"}</strong><p>{session.summary_zh || session.recommendation?.reasonZh || "总结已导入。"}</p></div><div className="summary-records"><div><strong>本次单词 · {words.length}</strong>{words.length ? <ul>{words.map((item) => <li key={item.id}><b>{item.word}</b><span>{item.reading}</span><small>{item.meaning}</small></li>)}</ul> : <p>本次没有新增单词。</p>}</div><div><strong>本次句子 · {sentences.length}</strong>{sentences.length ? <ul>{sentences.map((item) => <li key={`${item.original}-${item.corrected}`}><span className="old-sentence">{item.original}</span><b>{item.corrected}</b>{item.note && <small>{item.note}</small>}</li>)}</ul> : <p>本次没有新增句子。</p>}</div></div></section>;
 }
 
 function CheckRow({ label, checked, onClick }: { label: string; checked: boolean; onClick: () => void }) {

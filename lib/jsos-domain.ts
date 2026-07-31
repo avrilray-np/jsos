@@ -26,10 +26,66 @@ export type JsosSummary = {
   summaryZh: string;
 };
 
+type JsonRecord = Record<string, unknown>;
+
+function record(value: unknown): JsonRecord {
+  return value && typeof value === "object" && !Array.isArray(value) ? value as JsonRecord : {};
+}
+
+function text(value: unknown, fallback = "") {
+  return typeof value === "string" ? value : fallback;
+}
+
+export function normalizeSummaryInput(input: unknown): unknown {
+  if (!input || typeof input !== "object" || Array.isArray(input)) return input;
+  const root = { ...(input as JsonRecord) };
+  const task = record(root.task);
+  const words = Array.isArray(root.newWords) ? root.newWords : [];
+  const sentences = Array.isArray(root.sentences) ? root.sentences : [];
+
+  root.task = { ...task, difficulty: text(task.difficulty, "basic") || "basic" };
+  root.newWords = words.map((item) => {
+    const word = record(item);
+    return {
+      ...word,
+      word: text(word.word),
+      reading: text(word.reading),
+      meaningZh: text(word.meaningZh),
+      exampleJa: text(word.exampleJa),
+      exampleZh: text(word.exampleZh),
+      source: text(word.source, `Day ${typeof task.dayNumber === "number" ? task.dayNumber : ""} ${text(task.topic)}`.trim()),
+      priority: text(word.priority, "medium") || "medium",
+    };
+  });
+  root.sentences = sentences.map((item) => {
+    const sentence = record(item);
+    return {
+      ...sentence,
+      original: text(sentence.original, text(sentence.userSentence)),
+      corrected: text(sentence.corrected, text(sentence.recommendedSentence)),
+      isApproximate: typeof sentence.isApproximate === "boolean" ? sentence.isApproximate : false,
+      meaningZh: text(sentence.meaningZh),
+      category: text(sentence.category, "expression") || "expression",
+      explanationZh: text(sentence.explanationZh),
+      selfCorrected: typeof sentence.selfCorrected === "boolean" ? sentence.selfCorrected : false,
+      repeatCount: typeof sentence.repeatCount === "number" ? sentence.repeatCount : 1,
+      priority: text(sentence.priority, "medium") || "medium",
+    };
+  });
+  return root;
+}
+
+export function parseSummaryText(input: string): unknown {
+  const withoutFence = input.trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "");
+  const normalizedQuotes = withoutFence.replace(/[“”]/g, "\"");
+  return normalizeSummaryInput(JSON.parse(normalizedQuotes));
+}
+
 export function validateSummary(input: unknown): { ok: true; data: JsosSummary } | { ok: false; errors: string[] } {
   const errors: string[] = [];
-  if (!input || typeof input !== "object") return { ok: false, errors: ["总结不是 JSON 对象"] };
-  const value = input as Partial<JsosSummary>;
+  const normalized = normalizeSummaryInput(input);
+  if (!normalized || typeof normalized !== "object") return { ok: false, errors: ["总结不是 JSON 对象"] };
+  const value = normalized as Partial<JsosSummary>;
   if (value.schemaVersion !== "1.0") errors.push("schemaVersion 必须为 1.0");
   if (value.rubricVersion !== "1.0") errors.push("rubricVersion 必须为 1.0");
   if (!value.task?.taskId) errors.push("缺少 taskId");

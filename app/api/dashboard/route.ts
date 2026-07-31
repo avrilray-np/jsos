@@ -24,17 +24,19 @@ export async function GET(request: Request) {
     }
 
     const planId = encodeURIComponent(String(activePlan.id));
-    const [tasks, calendar, vocabulary, sentences, sessions] = await Promise.all([
+    const [tasks, calendar, vocabulary, vocabularySources, sentences, sessions, checkins] = await Promise.all([
       readRows(`tasks?select=id,day_number,topic,task_type,status,scheduled_for,content&plan_run_id=eq.${planId}&order=day_number.asc`, session.accessToken),
       readRows(`calendar_entries?select=calendar_date,state,task_id,note&plan_run_id=eq.${planId}&order=calendar_date.asc`, session.accessToken),
-      readRows(`vocabulary?select=word,reading,meaning_zh,status,priority&plan_run_id=eq.${planId}&order=first_seen_at.asc`, session.accessToken),
-      readRows(`sentences?select=original,corrected,explanation_zh,status&plan_run_id=eq.${planId}&order=created_at.asc`, session.accessToken),
-      readRows(`training_sessions?select=duration_minutes&plan_run_id=eq.${planId}`, session.accessToken),
+      readRows(`vocabulary?select=id,word,reading,meaning_zh,status,priority&plan_run_id=eq.${planId}&order=first_seen_at.asc`, session.accessToken),
+      readRows("vocabulary_sources?select=vocabulary_id,session_id", session.accessToken),
+      readRows(`sentences?select=session_id,original,corrected,explanation_zh,status&plan_run_id=eq.${planId}&order=created_at.asc`, session.accessToken),
+      readRows(`training_sessions?select=id,task_id,duration_minutes,communication_score,fluency_score,pronunciation_score,summary_zh,needs_reinforcement,recommendation,imported_at&plan_run_id=eq.${planId}&order=imported_at.desc`, session.accessToken),
+      readRows(`daily_checkins?select=check_date,anki,shadowing,monologue,writing&plan_run_id=eq.${planId}&order=check_date.asc`, session.accessToken),
     ]);
 
     const completed = (tasks as Array<{ status?: string }>).filter((task) => task.status === "completed").length;
     const expressions = (sentences as unknown[]).length;
-    return Response.json({ ok: true, activePlan, tasks, calendar, vocabulary, sentences, sessions, stats: { completed, expressions } });
+    return Response.json({ ok: true, activePlan, tasks, calendar, vocabulary, vocabularySources, sentences, sessions, checkins, stats: { completed, expressions } });
   } catch {
     return Response.json({ ok: false, message: "读取首页数据失败" }, { status: 502 });
   }

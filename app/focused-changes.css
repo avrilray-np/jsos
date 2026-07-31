@@ -48,6 +48,14 @@
 .calendar-day.deferred .original-day{display:none}
 .calendar-day.reinforcement em{display:block;width:8px;height:8px;right:8px;bottom:8px;padding:0;border-radius:50%;font-size:0;color:transparent}
 .mobile-topic{display:none}
+.calendar-day.done{cursor:pointer}
+.summary-records{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:17px}
+.summary-records>div{border:1px solid var(--line);border-radius:14px;padding:16px}
+.summary-records ul{list-style:none;padding:0;margin:12px 0 0}
+.summary-records li{display:grid;gap:3px;padding:10px 0;border-top:1px solid var(--line)}
+.summary-records li b{font-size:14px}
+.summary-records li span,.summary-records li small,.summary-records p{color:var(--muted);font-size:11px;margin:0}
+.summary-records .old-sentence{text-decoration:line-through}
 
 @media(min-width:821px){
   .hero-row{align-items:stretch}
@@ -84,6 +92,7 @@
   .mobile-topic{display:inline}
   .plan-form{grid-template-columns:1fr}
   .summary-import-button{width:100%}
+  .summary-records{grid-template-columns:1fr}
   .section-heading{position:relative}
   .calendar-actions{position:absolute;right:0;top:0;margin:0}
   .empty-plan{min-height:230px;padding:20px 10px}
