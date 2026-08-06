@@ -10,6 +10,9 @@
 .prompt-modal{width:min(720px,100%)}
 .modal .prompt-preview{min-height:300px;background:#f7f8f3;color:var(--ink);line-height:1.7}
 .summary-import-button{padding:13px 20px;box-shadow:0 8px 22px rgba(28,81,55,.18)}
+.button.warmup-button{background:#06c7b1;color:white;box-shadow:0 8px 20px rgba(6,199,177,.22)}
+.button.warmup-button:hover{background:#05b7a3}
+.button.warmup-button:disabled{background:#dfe5e1;color:#87908a;box-shadow:none;cursor:not-allowed}
 .import-card p{margin-bottom:20px}
 .mobile-library-links{display:none}
 .vocab-row button.marked{background:var(--green);border-color:var(--green);color:white}
@@ -46,7 +49,10 @@
 .calendar-day.done:before{content:"";position:absolute;right:0;top:0;width:28px;height:28px;background:var(--green);clip-path:polygon(0 0,100% 0,100% 100%)}
 .calendar-day.done:after{content:"✓";position:absolute;right:3px;top:1px;color:white;font-size:12px;font-weight:800;line-height:1;z-index:1}
 .calendar-day.deferred .original-day{display:none}
-.calendar-day.reinforcement em{display:block;width:8px;height:8px;right:8px;bottom:8px;padding:0;border-radius:50%;font-size:0;color:transparent}
+.calendar-day-label{display:flex;align-items:center;gap:4px;width:100%;min-width:0}
+.calendar-day.reinforcement .calendar-day-label em{display:block;position:static;flex:0 0 5px;width:5px;height:5px;padding:0;border-radius:50%;background:var(--coral);font-size:0;color:transparent}
+.calendar-day strong.calendar-topic{display:block;width:100%;max-width:100%;min-width:0;overflow:hidden}
+.calendar-topic .desktop-topic,.calendar-topic .mobile-topic{min-width:0;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
 .mobile-topic{display:none}
 .calendar-day.done{cursor:pointer}
 .summary-records{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:17px}
@@ -56,6 +62,19 @@
 .summary-records li b{font-size:14px}
 .summary-records li span,.summary-records li small,.summary-records p{color:var(--muted);font-size:11px;margin:0}
 .summary-records .old-sentence{text-decoration:line-through}
+.warmup-list{display:grid;gap:14px}
+.warmup-item{background:var(--panel);border:1px solid var(--line);border-radius:20px;padding:24px}
+.warmup-heading{display:flex;align-items:center;justify-content:space-between;gap:14px}
+.warmup-heading button{border:0;background:transparent;color:var(--green);font-weight:700;cursor:pointer;padding:6px 0}
+.warmup-item h2{font-size:23px;margin:14px 0 18px}
+.warmup-item label{display:grid;gap:7px;color:var(--muted);font-size:11px}
+.warmup-item input{width:100%;border:1px solid var(--line);border-radius:12px;background:white;padding:13px 14px;color:var(--ink)}
+.warmup-answer{display:grid;gap:6px;margin-top:14px;padding:14px;border-radius:12px;background:var(--soft-green)}
+.warmup-answer>span{font-size:10px;color:var(--green);font-weight:700}
+.warmup-answer strong{font-size:18px;line-height:1.5}
+.warmup-answer .answer-part{font:inherit;color:inherit;font-weight:inherit}
+.warmup-answer ruby{font:inherit;color:inherit;font-weight:inherit;ruby-position:over;ruby-align:center;margin:0 .02em}
+.warmup-answer rt{font-size:.52em;font-weight:500;color:var(--green);letter-spacing:.02em}
 
 @media(min-width:821px){
   .hero-row{align-items:stretch}
@@ -87,13 +106,18 @@
   .calendar-day.today{border-radius:6px}
   .calendar-day.done:before{width:20px;height:20px}
   .calendar-day.done:after{right:2px;top:0;font-size:9px}
-  .calendar-day.reinforcement em{right:6px;top:6px;bottom:auto}
   .desktop-topic{display:none}
   .mobile-topic{display:inline}
   .plan-form{grid-template-columns:1fr}
   .summary-import-button{width:100%}
   .summary-records{grid-template-columns:1fr}
+  .warmup-item{padding:18px}
+  .warmup-item h2{font-size:19px}
   .section-heading{position:relative}
   .calendar-actions{position:absolute;right:0;top:0;margin:0}
   .empty-plan{min-height:230px;padding:20px 10px}
 }
+.score-heading>.goal-status{font-size:15px;white-space:nowrap}
+.score-heading>.goal-status.achieved{color:var(--green)}
+.score-heading>.goal-status.pending{color:#e28a2b}
+.score-heading>.goal-status.unknown{color:var(--muted)}

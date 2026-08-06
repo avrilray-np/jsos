@@ -30,13 +30,25 @@ export async function GET(request: Request) {
       readRows(`vocabulary?select=id,word,reading,meaning_zh,status,priority&plan_run_id=eq.${planId}&order=first_seen_at.asc`, session.accessToken),
       readRows("vocabulary_sources?select=vocabulary_id,session_id", session.accessToken),
       readRows(`sentences?select=session_id,original,corrected,explanation_zh,status&plan_run_id=eq.${planId}&order=created_at.asc`, session.accessToken),
-      readRows(`training_sessions?select=id,task_id,duration_minutes,communication_score,fluency_score,pronunciation_score,summary_zh,needs_reinforcement,recommendation,imported_at&plan_run_id=eq.${planId}&order=imported_at.desc`, session.accessToken),
+      readRows(`training_sessions?select=id,task_id,duration_minutes,communication_score,fluency_score,pronunciation_score,summary_zh,needs_reinforcement,recommendation,raw_summary,imported_at&plan_run_id=eq.${planId}&order=imported_at.desc`, session.accessToken),
       readRows(`daily_checkins?select=check_date,anki,shadowing,monologue,writing&plan_run_id=eq.${planId}&order=check_date.asc`, session.accessToken),
     ]);
 
     const completed = (tasks as Array<{ status?: string }>).filter((task) => task.status === "completed").length;
     const expressions = (sentences as unknown[]).length;
-    return Response.json({ ok: true, activePlan, tasks, calendar, vocabulary, vocabularySources, sentences, sessions, checkins, stats: { completed, expressions } });
+    const safeSessions = (sessions as Array<Record<string, unknown>>).map(({ raw_summary: rawSummary, ...trainingSession }) => {
+      const summarySession = rawSummary && typeof rawSummary === "object"
+        ? (rawSummary as { session?: unknown }).session
+        : null;
+      const coreGoalAchieved = summarySession && typeof summarySession === "object"
+        ? (summarySession as { coreGoalAchieved?: unknown }).coreGoalAchieved
+        : null;
+      return {
+        ...trainingSession,
+        core_goal_achieved: typeof coreGoalAchieved === "boolean" ? coreGoalAchieved : null,
+      };
+    });
+    return Response.json({ ok: true, activePlan, tasks, calendar, vocabulary, vocabularySources, sentences, sessions: safeSessions, checkins, stats: { completed, expressions } });
   } catch {
     return Response.json({ ok: false, message: "读取首页数据失败" }, { status: 502 });
   }
