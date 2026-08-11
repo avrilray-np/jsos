@@ -27,9 +27,9 @@ export async function GET(request: Request) {
     const [tasks, calendar, vocabulary, vocabularySources, sentences, sessions, checkins] = await Promise.all([
       readRows(`tasks?select=id,day_number,topic,task_type,status,scheduled_for,content&plan_run_id=eq.${planId}&order=day_number.asc`, session.accessToken),
       readRows(`calendar_entries?select=calendar_date,state,task_id,note&plan_run_id=eq.${planId}&order=calendar_date.asc`, session.accessToken),
-      readRows(`vocabulary?select=id,word,reading,meaning_zh,status,priority&plan_run_id=eq.${planId}&order=first_seen_at.asc`, session.accessToken),
+      readRows(`vocabulary?select=id,word,reading,meaning_zh,status,priority,source_type,source_task_id&plan_run_id=eq.${planId}&order=first_seen_at.asc`, session.accessToken),
       readRows("vocabulary_sources?select=vocabulary_id,session_id", session.accessToken),
-      readRows(`sentences?select=session_id,original,corrected,explanation_zh,status&plan_run_id=eq.${planId}&order=created_at.asc`, session.accessToken),
+      readRows(`sentences?select=id,session_id,source_task_id,source_type,original,corrected,meaning_zh,explanation_zh,status&plan_run_id=eq.${planId}&order=created_at.asc`, session.accessToken),
       readRows(`training_sessions?select=id,task_id,duration_minutes,communication_score,fluency_score,pronunciation_score,summary_zh,needs_reinforcement,recommendation,raw_summary,imported_at&plan_run_id=eq.${planId}&order=imported_at.desc`, session.accessToken),
       readRows(`daily_checkins?select=check_date,anki,shadowing,monologue,writing&plan_run_id=eq.${planId}&order=check_date.asc`, session.accessToken),
     ]);

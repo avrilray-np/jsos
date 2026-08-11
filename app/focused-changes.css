@@ -14,6 +14,8 @@
 .button.warmup-button:hover{background:#05b7a3}
 .button.warmup-button:disabled{background:#dfe5e1;color:#87908a;box-shadow:none;cursor:not-allowed}
 .import-card p{margin-bottom:20px}
+.summary-update-note{display:block;margin-top:10px;color:var(--muted);font-size:11px;line-height:1.5}
+.calendar-update-note{margin:14px 0 0;text-align:right;color:var(--muted);font-size:11px;line-height:1.5}
 .mobile-library-links{display:none}
 .vocab-row button.marked{background:var(--green);border-color:var(--green);color:white}
 .vocab-row.row-complete{background:#edf4eb}
@@ -57,11 +59,19 @@
 .calendar-day.done{cursor:pointer}
 .summary-records{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:17px}
 .summary-records>div{border:1px solid var(--line);border-radius:14px;padding:16px}
+.summary-record-heading{display:flex;align-items:center;justify-content:space-between;gap:10px}
+.summary-record-heading button{border:0;border-radius:9px;background:var(--soft-green);color:var(--green);padding:7px 9px;font-size:10px;font-weight:700;white-space:nowrap;cursor:pointer}
+.summary-record-heading button:hover{background:var(--green);color:white}
 .summary-records ul{list-style:none;padding:0;margin:12px 0 0}
 .summary-records li{display:grid;gap:3px;padding:10px 0;border-top:1px solid var(--line)}
 .summary-records li b{font-size:14px}
 .summary-records li span,.summary-records li small,.summary-records p{color:var(--muted);font-size:11px;margin:0}
 .summary-records .old-sentence{text-decoration:line-through}
+.user-record-modal{width:min(520px,100%)}
+.user-record-form{display:grid;gap:13px;margin-top:18px}
+.user-record-form label{display:grid;gap:7px;color:var(--muted);font-size:11px;font-weight:700}
+.user-record-form input{width:100%;border:1px solid var(--line);border-radius:11px;background:white;padding:12px 13px;color:var(--ink)}
+.user-record-form input:focus{outline:2px solid rgba(28,81,55,.18);border-color:var(--green)}
 .warmup-list{display:grid;gap:14px}
 .warmup-item{background:var(--panel);border:1px solid var(--line);border-radius:20px;padding:24px}
 .warmup-heading{display:flex;align-items:center;justify-content:space-between;gap:14px}
@@ -111,6 +121,7 @@
   .plan-form{grid-template-columns:1fr}
   .summary-import-button{width:100%}
   .summary-records{grid-template-columns:1fr}
+  .calendar-update-note{text-align:left;font-size:10px}
   .warmup-item{padding:18px}
   .warmup-item h2{font-size:19px}
   .section-heading{position:relative}
