@@ -1,5 +1,5 @@
-import { getServerConfig, isCloudConfigured } from "./server-config";
-import { supabaseAuth } from "./supabase-rest";
+import { isCloudConfigured } from "./server-config";
+import { supabaseAuth, supabaseUser } from "./supabase-rest";
 
 export const ACCESS_COOKIE = "jsos_access_token";
 export const REFRESH_COOKIE = "jsos_refresh_token";
@@ -16,6 +16,16 @@ export type JsosSession = {
   userId: string;
   email: string;
   accessToken: string;
+  isAdmin: boolean;
+  passwordPromptPending: boolean;
+};
+
+type ProfileRow = {
+  id: string;
+  email: string;
+  role: "user" | "admin";
+  password_prompt_pending: boolean;
+  access_enabled: boolean;
 };
 
 export function readCookie(request: Request, name: string) {
@@ -59,15 +69,27 @@ export async function refreshRequestSession(request: Request): Promise<{ session
     if (!userResponse.ok) return null;
     user = await userResponse.json() as SupabaseUser;
   }
-  const session = normalizeSession(user, tokens.access_token);
+  const session = await normalizeSession(user, tokens.access_token);
   return session ? { session, tokens } : null;
 }
 
-function normalizeSession(user: SupabaseUser, accessToken: string): JsosSession | null {
+async function normalizeSession(user: SupabaseUser, accessToken: string): Promise<JsosSession | null> {
   const email = user.email?.trim().toLowerCase() ?? "";
-  const allowedEmail = getServerConfig().allowedEmail;
-  if (!user.id || !email || !allowedEmail || email !== allowedEmail) return null;
-  return { userId: user.id, email, accessToken };
+  if (!user.id || !email) return null;
+  const response = await supabaseUser(
+    `profiles?select=id,email,role,password_prompt_pending,access_enabled&id=eq.${encodeURIComponent(user.id)}&limit=1`,
+    accessToken,
+  );
+  if (!response.ok) return null;
+  const [profile] = await response.json() as ProfileRow[];
+  if (!profile || !profile.access_enabled || profile.email.toLowerCase() !== email) return null;
+  return {
+    userId: user.id,
+    email,
+    accessToken,
+    isAdmin: profile.role === "admin",
+    passwordPromptPending: profile.password_prompt_pending,
+  };
 }
 
 export function appendSessionCookies(headers: Headers, request: Request, tokens: TokenResponse) {

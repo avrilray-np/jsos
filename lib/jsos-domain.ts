@@ -28,6 +28,38 @@ export type JsosSummary = {
 
 type JsonRecord = Record<string, unknown>;
 
+export class SummaryParseError extends SyntaxError {
+  readonly errorCode: string;
+
+  constructor(input: string, error: unknown) {
+    const location = jsonErrorLocation(input, error);
+    const errorCode = `JSOS-JSON-${stableTextHash(input)}`;
+    super(`JSON 解析失败${location ? `，位置：${location}` : ""}。错误编号：${errorCode}`);
+    this.name = "SummaryParseError";
+    this.errorCode = errorCode;
+  }
+}
+
+function stableTextHash(input: string) {
+  let hash = 2166136261;
+  for (let index = 0; index < input.length; index += 1) {
+    hash ^= input.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  return (hash >>> 0).toString(16).toUpperCase().padStart(8, "0");
+}
+
+function jsonErrorLocation(input: string, error: unknown) {
+  const message = error instanceof Error ? error.message : "";
+  const existing = message.match(/line\s+(\d+)\s+column\s+(\d+)/i);
+  if (existing) return `第 ${existing[1]} 行第 ${existing[2]} 列`;
+  const position = message.match(/position\s+(\d+)/i);
+  if (!position) return "";
+  const offset = Math.min(Number(position[1]), input.length);
+  const lines = input.slice(0, offset).split("\n");
+  return `第 ${lines.length} 行第 ${(lines.at(-1)?.length ?? 0) + 1} 列`;
+}
+
 function record(value: unknown): JsonRecord {
   return value && typeof value === "object" && !Array.isArray(value) ? value as JsonRecord : {};
 }
@@ -77,8 +109,71 @@ export function normalizeSummaryInput(input: unknown): unknown {
 
 export function parseSummaryText(input: string): unknown {
   const withoutFence = input.trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "");
-  const normalizedQuotes = withoutFence.replace(/[“”]/g, "\"");
-  return normalizeSummaryInput(JSON.parse(normalizedQuotes));
+  try {
+    return normalizeSummaryInput(JSON.parse(withoutFence));
+  } catch (originalError) {
+    const repaired = repairStructuralSmartQuotes(withoutFence);
+    if (repaired === withoutFence) throw new SummaryParseError(withoutFence, originalError);
+    try {
+      return normalizeSummaryInput(JSON.parse(repaired));
+    } catch (repairError) {
+      throw new SummaryParseError(withoutFence, repairError);
+    }
+  }
+}
+
+function repairStructuralSmartQuotes(input: string) {
+  let result = "";
+  let inAsciiString = false;
+  let inSmartString = false;
+  let escaped = false;
+
+  function previousNonWhitespace() {
+    for (let index = result.length - 1; index >= 0; index -= 1) {
+      if (!/\s/.test(result[index])) return result[index];
+    }
+    return "";
+  }
+
+  function nextNonWhitespace(start: number) {
+    for (let index = start; index < input.length; index += 1) {
+      if (!/\s/.test(input[index])) return input[index];
+    }
+    return "";
+  }
+
+  for (let index = 0; index < input.length; index += 1) {
+    const character = input[index];
+    if (inAsciiString) {
+      result += character;
+      if (escaped) escaped = false;
+      else if (character === "\\") escaped = true;
+      else if (character === '"') inAsciiString = false;
+      continue;
+    }
+
+    if (inSmartString) {
+      if (character === "”" && [":", ",", "}", "]", ""].includes(nextNonWhitespace(index + 1))) {
+        result += '"';
+        inSmartString = false;
+      } else {
+        result += character;
+      }
+      continue;
+    }
+
+    if (character === '"') {
+      inAsciiString = true;
+      result += character;
+    } else if (character === "“" && ["", "{", "[", ",", ":"].includes(previousNonWhitespace())) {
+      inSmartString = true;
+      result += '"';
+    } else {
+      result += character;
+    }
+  }
+
+  return result;
 }
 
 export function validateSummary(input: unknown): { ok: true; data: JsosSummary } | { ok: false; errors: string[] } {

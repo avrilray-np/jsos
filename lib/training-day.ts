@@ -12,6 +12,12 @@ export function getJsosTrainingDate(now = new Date()) {
   });
 }
 
+export function getPreviousTrainingDate(date: string) {
+  const instant = new Date(`${date}T00:00:00.000Z`);
+  instant.setUTCDate(instant.getUTCDate() - 1);
+  return instant.toISOString().slice(0, 10);
+}
+
 export function millisecondsUntilNextTrainingDay(now = new Date(), graceMs = 10_000) {
   const parts = new Intl.DateTimeFormat("en-CA", {
     timeZone: JSOS_TIME_ZONE,

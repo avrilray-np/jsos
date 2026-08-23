@@ -36,3 +36,16 @@ export async function supabaseUser(path: string, accessToken: string, init: Requ
     },
   });
 }
+
+export async function supabaseStorage(path: string, init: RequestInit = {}) {
+  const config = getServerConfig();
+  if (!config.supabaseUrl || !config.supabaseServiceRoleKey) throw new Error("Supabase 尚未配置");
+  return fetch(`${config.supabaseUrl}/storage/v1/${path}`, {
+    ...init,
+    headers: {
+      apikey: config.supabaseServiceRoleKey,
+      Authorization: `Bearer ${config.supabaseServiceRoleKey}`,
+      ...(init.headers ?? {}),
+    },
+  });
+}

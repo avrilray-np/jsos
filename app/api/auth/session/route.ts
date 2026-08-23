@@ -7,13 +7,13 @@ export async function GET(request: Request) {
   }
 
   const current = await getRequestSession(request);
-  if (current) return Response.json({ ok: true, user: { email: current.email } });
+  if (current) return Response.json({ ok: true, user: { email: current.email, isAdmin: current.isAdmin, passwordPromptPending: current.passwordPromptPending } });
 
   const refreshed = await refreshRequestSession(request);
   if (refreshed) {
     const headers = new Headers({ "Content-Type": "application/json" });
     appendSessionCookies(headers, request, refreshed.tokens);
-    return new Response(JSON.stringify({ ok: true, user: { email: refreshed.session.email }, refreshed: true }), { status: 200, headers });
+    return new Response(JSON.stringify({ ok: true, user: { email: refreshed.session.email, isAdmin: refreshed.session.isAdmin, passwordPromptPending: refreshed.session.passwordPromptPending }, refreshed: true }), { status: 200, headers });
   }
 
   const headers = new Headers({ "Content-Type": "application/json" });

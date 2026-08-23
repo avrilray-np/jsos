@@ -3,7 +3,6 @@ export type ServerConfig = {
   supabaseAnonKey: string;
   supabaseServiceRoleKey: string;
   openAiApiKey: string;
-  allowedEmail: string;
 };
 
 export function getServerConfig(): ServerConfig {
@@ -12,7 +11,6 @@ export function getServerConfig(): ServerConfig {
     supabaseAnonKey: process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? "",
     supabaseServiceRoleKey: process.env.SUPABASE_SERVICE_ROLE_KEY ?? "",
     openAiApiKey: process.env.OPENAI_API_KEY ?? "",
-    allowedEmail: (process.env.JSOS_ALLOWED_EMAIL ?? "").toLowerCase(),
   };
 }
 

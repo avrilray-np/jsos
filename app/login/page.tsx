@@ -40,11 +40,11 @@ export default function LoginPage() {
         <h2>登录 JSOS</h2>
         <form onSubmit={handleSubmit}>
           <label>邮箱<input name="email" type="email" placeholder="name@example.com" autoComplete="email" required /></label>
-          <label>密码<input name="password" type="password" placeholder="至少 8 位" autoComplete="current-password" required minLength={8} /></label>
+          <label>密码<input name="password" type="password" placeholder="输入管理员提供的密码" autoComplete="current-password" required /></label>
           <button className="button primary" type="submit" disabled={submitting}>{submitting ? "正在登录…" : "登录"}</button>
         </form>
         {message && <div className="message">{message}</div>}
-        <small>暂未开放注册 · 敬请期待</small>
+        <small>内测期间暂不开放注册 · 如需账号请联系管理员</small>
       </section>
     </main>
   );
