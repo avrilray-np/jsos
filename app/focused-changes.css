@@ -25,6 +25,8 @@
 .auth-loading{min-height:100vh;display:grid;place-content:center;justify-items:center;gap:14px;color:var(--green)}
 .login-brand .login-logo{width:96px;padding:0 12px;font-size:40px;letter-spacing:.08em;margin-bottom:0px}
 .settings-modal{width:min(560px,100%)}
+.avatar{cursor:pointer;transition:background .18s,color .18s,border-color .18s}
+.avatar.unread{background:var(--coral);border-color:var(--coral);color:white}
 .plan-status{margin:18px 0;padding:16px;border-radius:14px;background:var(--soft-green)}
 .plan-status strong{display:block;color:var(--green)}
 .plan-status p{margin:6px 0 0;color:var(--ink)}
@@ -34,6 +36,9 @@
 .plan-form input,.plan-form select{width:100%;border:1px solid var(--line);border-radius:10px;background:white;padding:11px;color:var(--ink)}
 .settings-note{margin:16px 0 0;font-size:12px;color:var(--muted);line-height:1.6}
 .settings-actions{justify-content:space-between}
+.account-settings-actions{margin-top:30px}
+.plan-settings-actions{justify-content:flex-end}
+.plan-recreate-button{display:flex;margin:0 0 14px auto;background:var(--green);color:white}
 .account-links{display:grid;margin-top:18px;border-top:1px solid var(--line)}
 .account-links a,.account-links button{width:100%;display:flex;align-items:center;gap:7px;border:0;border-bottom:1px solid var(--line);background:transparent;padding:13px 2px;color:var(--ink);text-decoration:none;text-align:left;cursor:pointer;font-weight:700;font-size:13px}
 .account-links a span,.account-links button span{margin-left:auto;color:var(--green)}

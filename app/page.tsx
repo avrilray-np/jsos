@@ -27,6 +27,7 @@ type DailyChecks = Record<CheckKey, boolean>;
 type TrainingSession = { id: string; task_id: string; duration_minutes: number | null; communication_score: number | null; fluency_score: number | null; pronunciation_score: number | null; summary_zh: string | null; needs_reinforcement: boolean; core_goal_achieved: boolean | null; recommendation: { reasonZh?: string; suggestedFocus?: string[] } | null; imported_at: string };
 type ReviewRecords = { vocabularyIds: string[]; sentenceIds: string[] };
 type SessionUser = { email: string; isAdmin: boolean; passwordPromptPending: boolean };
+type SettingsPage = "account" | "plan";
 
 const VALID_VIEWS: View[] = ["calendar", "task", "vocabulary", "sentences", "anki", "review", "warmup"];
 const VIEW_STORAGE_KEY = "jsos-current-view";
@@ -87,6 +88,8 @@ export default function Home() {
   const [reviewByDate, setReviewByDate] = useState<Record<string, ReviewRecords>>({});
   const [backLabel, setBackLabel] = useState("首页");
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [settingsPage, setSettingsPage] = useState<SettingsPage>("account");
+  const [planFormExpanded, setPlanFormExpanded] = useState(false);
   const [plans, setPlans] = useState<PlanRun[]>([]);
   const [plansLoading, setPlansLoading] = useState(false);
   const [planKind, setPlanKind] = useState<"trial" | "official">("trial");
@@ -331,7 +334,16 @@ export default function Home() {
     }
   }
 
+  function openAccountSettings() {
+    setSettingsPage("account");
+    setPlanFormExpanded(false);
+    setPlanMessage("");
+    setSettingsOpen(true);
+  }
+
   function openPlanSettings() {
+    setSettingsPage("plan");
+    setPlanFormExpanded(false);
     setSettingsOpen(true);
     if (!planStartDate) setPlanStartDate(getJsosTrainingDate());
     void loadPlans();
@@ -358,8 +370,10 @@ export default function Home() {
         return;
       }
       if (!response.ok || !data.ok) throw new Error(data.message ?? "创建训练计划失败");
-      setPlanMessage(data.message ?? "训练计划已创建");
+      const successMessage = data.message ?? "训练计划已创建";
       await Promise.all([loadPlans(), loadDashboard()]);
+      setPlanFormExpanded(false);
+      setPlanMessage(successMessage);
     } catch (error) {
       setPlanMessage(error instanceof Error ? error.message : "创建训练计划失败");
     } finally {
@@ -556,7 +570,7 @@ export default function Home() {
           <button className={view === "vocabulary" ? "active" : ""} onClick={() => navigate("vocabulary")}>单词</button>
           <button className={view === "sentences" ? "active" : ""} onClick={() => navigate("sentences")}>句子</button>
         </nav>
-        <button className="avatar" aria-label="打开计划设置" onClick={openPlanSettings}>{sessionUser?.email.slice(0, 1).toUpperCase() ?? "A"}</button>
+        <button className={`avatar${sessionUser?.isAdmin && feedbackUnreadCount > 0 ? " unread" : ""}`} aria-label="打开账号设置" onClick={openAccountSettings}>{sessionUser?.email.slice(0, 1).toUpperCase() ?? "A"}</button>
       </header>
 
       {view === "calendar" && <CalendarView tasks={tasks} activePlan={activePlan} loading={dashboardLoading} message={dashboardMessage} month={calendarMonth} progress={progress} expressionCount={expressionCount} vocabularyCounts={[vocabularyNewCount, vocabularyKnownCount]} sentenceCounts={[sentenceLearningCount, sentenceMasteredCount]} isAdmin={sessionUser?.isAdmin ?? false} feedbackUnreadCount={feedbackUnreadCount} onTask={openTask} onNavigate={navigate} onMonthChange={setCalendarMonth} onOpenSettings={openPlanSettings} />}
@@ -604,33 +618,42 @@ export default function Home() {
         <div className="modal-backdrop" role="presentation" onMouseDown={() => setSettingsOpen(false)}>
           <section className="modal settings-modal" role="dialog" aria-modal="true" aria-labelledby="settings-title" onMouseDown={(event) => event.stopPropagation()}>
             <div className="modal-heading">
-              <div><span className="eyebrow">Private settings</span><h2 id="settings-title">训练计划设置</h2></div>
+              <div><span className="eyebrow">Private settings</span><h2 id="settings-title">{settingsPage === "account" ? "账号设置" : "训练计划设置"}</h2></div>
               <button className="icon-button" onClick={() => setSettingsOpen(false)} aria-label="关闭">×</button>
             </div>
-            <div className="plan-status">
-              <strong>当前计划</strong>
-              {plansLoading && plans.length === 0 ? <p>正在读取…</p> : plans.find((plan) => plan.status === "active") ? (() => {
-                const active = plans.find((plan) => plan.status === "active")!;
-                return <p>{active.kind === "trial" ? "试运行" : "正式训练"} · {active.starts_on} 开始</p>;
-              })() : <p>尚未创建训练计划</p>}
-              {plans.filter((plan) => plan.status === "archived").length > 0 && <small>已归档 {plans.filter((plan) => plan.status === "archived").length} 个旧计划</small>}
-            </div>
-            <div className="plan-form">
-              <label>计划类型<select value={planKind} onChange={(event) => setPlanKind(event.target.value as "trial" | "official")}><option value="trial">试运行</option><option value="official">正式训练</option></select></label>
-              <label>Day 1 日期<input type="date" value={planStartDate} onChange={(event) => setPlanStartDate(event.target.value)} /></label>
-            </div>
-            <p className="settings-note">创建新计划会安全归档当前计划。课程模板保留，旧计划不会参与新计划统计。</p>
-            <div className="account-links" aria-label="账号与帮助">
-              <a href="/guide">使用指南<span>→</span></a>
-              <a href="/feedback">提交反馈<span>→</span></a>
-              {sessionUser?.isAdmin && <a href="/admin/feedback">反馈管理 {feedbackUnreadCount > 0 && <b>{feedbackUnreadCount}</b>}<span>→</span></a>}
-              <button type="button" onClick={() => { setSettingsOpen(false); setPasswordOpen(true); setPasswordMessage(""); }}>修改密码<span>→</span></button>
-            </div>
-            {planMessage && <div className={planMessage.includes("已创建") ? "message success" : "message"}>{planMessage}</div>}
-            <div className="modal-actions settings-actions">
-              <button className="button secondary" onClick={logOut}>退出登录</button>
-              <button className="button primary" disabled={plansLoading} onClick={createPlan}>{plansLoading ? "处理中…" : "创建计划"}</button>
-            </div>
+            {settingsPage === "account" ? <>
+              <div className="account-links" aria-label="账号与帮助">
+                <button type="button" onClick={openPlanSettings}>训练计划设置<span>→</span></button>
+                <a href="/guide">使用指南<span>→</span></a>
+                <a href="/feedback">提交反馈<span>→</span></a>
+                {sessionUser?.isAdmin && <a href="/admin/feedback">反馈管理 {feedbackUnreadCount > 0 && <b>{feedbackUnreadCount}</b>}<span>→</span></a>}
+                <button type="button" onClick={() => { setSettingsOpen(false); setPasswordOpen(true); setPasswordMessage(""); }}>修改密码<span>→</span></button>
+              </div>
+              <div className="modal-actions settings-actions account-settings-actions">
+                <button className="button secondary" onClick={logOut}>退出登录</button>
+              </div>
+            </> : (() => {
+              const currentPlan = plans.find((plan) => plan.status === "active");
+              const archivedCount = plans.filter((plan) => plan.status === "archived").length;
+              const showPlanForm = planFormExpanded || (!plansLoading && !currentPlan);
+              return <>
+                <div className="plan-status">
+                  <strong>当前计划</strong>
+                  {plansLoading && plans.length === 0 ? <p>正在读取…</p> : currentPlan ? <p>{currentPlan.kind === "trial" ? "试运行" : "正式训练"} · {currentPlan.starts_on} 开始</p> : <p>尚未创建训练计划</p>}
+                  {archivedCount > 0 && <small>已归档 {archivedCount} 个旧计划</small>}
+                </div>
+                {currentPlan && !planFormExpanded && <button className="button plan-recreate-button" type="button" onClick={() => { setPlanFormExpanded(true); setPlanMessage(""); }}>重新创建计划</button>}
+                {showPlanForm && <div className="plan-form">
+                  <label>计划类型<select value={planKind} onChange={(event) => setPlanKind(event.target.value as "trial" | "official")}><option value="trial">试运行</option><option value="official">正式训练</option></select></label>
+                  <label>Day 1 日期<input type="date" value={planStartDate} onChange={(event) => setPlanStartDate(event.target.value)} /></label>
+                </div>}
+                <p className="settings-note">创建新计划会安全归档当前计划。课程模板保留，旧计划不会参与新计划统计。</p>
+                {planMessage && <div className={planMessage.includes("已创建") ? "message success" : "message"}>{planMessage}</div>}
+                {showPlanForm && <div className="modal-actions settings-actions plan-settings-actions">
+                  <button className="button primary" disabled={plansLoading} onClick={createPlan}>{plansLoading ? "处理中…" : "创建计划"}</button>
+                </div>}
+              </>;
+            })()}
           </section>
         </div>
       )}
