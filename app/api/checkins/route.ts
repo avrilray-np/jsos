@@ -1,6 +1,7 @@
 import { getRequestSession } from "../../../lib/auth-session";
 import { isCloudConfigured } from "../../../lib/server-config";
 import { supabaseUser } from "../../../lib/supabase-rest";
+import { getJsosTrainingDate } from "../../../lib/training-day";
 
 const CHECK_KEYS = ["anki", "shadowing", "monologue", "writing"] as const;
 type CheckKey = (typeof CHECK_KEYS)[number];
@@ -14,6 +15,7 @@ export async function PATCH(request: Request) {
     const body = await request.json() as { date?: string; key?: string; value?: boolean };
     if (!/^\d{4}-\d{2}-\d{2}$/.test(body.date ?? "")) return Response.json({ ok: false, message: "训练日期无效" }, { status: 400 });
     if (!CHECK_KEYS.includes(body.key as CheckKey) || typeof body.value !== "boolean") return Response.json({ ok: false, message: "打卡项目无效" }, { status: 400 });
+    if (body.date !== getJsosTrainingDate()) return Response.json({ ok: false, message: "仅能修改当前训练日的打卡记录" }, { status: 409 });
 
     const plans = await supabaseUser("plan_runs?select=id&status=eq.active&limit=1", session.accessToken);
     if (!plans.ok) throw new Error("active plan unavailable");

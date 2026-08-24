@@ -660,7 +660,7 @@ export default function Home() {
   }
 
   function openTask(task: CalendarTask) {
-    if (!task.taskId || (task.status !== "today" && task.status !== "done")) return;
+    if (!task.taskId || task.status === "deferred") return;
     if (task.content?.generationState === "failed") {
       const nextRetryCount = (task.content.manualRetryCount ?? 0) + 1;
       setTasks((items) => items.map((item) => item.taskId === task.taskId ? {
@@ -739,7 +739,7 @@ export default function Home() {
       </header>
 
       {view === "calendar" && <CalendarView tasks={tasks} activePlan={activePlan} loading={dashboardLoading} message={dashboardMessage} month={calendarMonth} progress={progress} expressionCount={expressionCount} vocabularyCounts={[vocabularyNewCount, vocabularyKnownCount]} sentenceCounts={[sentenceLearningCount, sentenceMasteredCount]} isAdmin={sessionUser?.isAdmin ?? false} feedbackUnreadCount={feedbackUnreadCount} onTask={openTask} onNavigate={navigate} onMonthChange={setCalendarMonth} onOpenSettings={openPlanSettings} />}
-      {view === "task" && current && <TaskView current={current} nextTask={nextTask} complete={taskComplete || current.status === "done"} copied={copied} checks={currentChecks} session={currentSession} words={currentWords} sentences={currentSentences} reviewCounts={[reviewWords.length, reviewSentences.length]} canImportSummary={current.date === getJsosTrainingDate()} warmupAvailable={Boolean(currentWarmup)} onOpenWarmup={() => navigate("warmup")} onOpenPrompt={() => setPromptOpen(true)} onOpenChatGPT={openChatGPT} onOpenSummary={() => { setSummarySaved(false); setSummaryOpen(true); }} onAddVocabulary={() => openUserRecord("vocabulary")} onAddSentence={() => openUserRecord("sentence")} onCheck={(key) => void saveCheckin(current.date, key, !currentChecks[key])} onNavigate={navigate} onBack={goBack} backLabel={displayedBackLabel} />}
+      {view === "task" && current && <TaskView current={current} nextTask={nextTask} complete={taskComplete || current.status === "done"} copied={copied} checks={currentChecks} session={currentSession} words={currentWords} sentences={currentSentences} reviewCounts={[reviewWords.length, reviewSentences.length]} summaryTiming={current.date === getJsosTrainingDate() ? "open" : current.date > getJsosTrainingDate() ? "future" : "closed"} warmupAvailable={Boolean(currentWarmup)} onOpenWarmup={() => navigate("warmup")} onOpenPrompt={() => setPromptOpen(true)} onOpenChatGPT={openChatGPT} onOpenSummary={() => { setSummarySaved(false); setSummaryOpen(true); }} onAddVocabulary={() => openUserRecord("vocabulary")} onAddSentence={() => openUserRecord("sentence")} onCheck={(key) => void saveCheckin(current.date, key, !currentChecks[key])} onNavigate={navigate} onBack={goBack} backLabel={displayedBackLabel} />}
       {view === "vocabulary" && <VocabularyView items={vocabulary} counts={[vocabularyNewCount, vocabularyKnownCount]} onToggle={toggleVocabulary} onBack={goBack} backLabel={displayedBackLabel} />}
       {view === "sentences" && <SentencesView items={sentences} counts={[sentenceLearningCount, sentenceMasteredCount]} onToggle={toggleSentence} onBack={goBack} backLabel={displayedBackLabel} />}
       {view === "anki" && <AnkiView items={vocabulary} completed={ankiCompleted} onToggle={toggleAnki} onNotify={notify} onBack={goBack} backLabel={displayedBackLabel} />}
@@ -967,7 +967,7 @@ function CalendarView({ tasks, activePlan, loading, message, month, progress, ex
             const isoDate = day > 0 && day <= daysInMonth ? `${effectiveMonth}-${String(day).padStart(2, "0")}` : "";
             const task = taskByDate.get(isoDate);
             return isoDate ? (
-              <button key={isoDate} className={`calendar-day ${task?.status ?? "empty"} ${task?.kind ?? ""}`} onClick={task && (task.status === "today" || task.status === "done") ? () => onTask(task) : undefined}>
+              <button key={isoDate} className={`calendar-day ${task?.status ?? "empty"} ${task?.kind ?? ""}`} onClick={task && task.status !== "deferred" ? () => onTask(task) : undefined}>
                 <span className="date-number">{day}日</span>
                 {task?.status === "deferred" ? <strong>已顺延</strong> : task?.topic ? <><small className="calendar-day-label">{task.kind === "reinforcement" && <em aria-label="补强" />}<span>Day {task.day}</span></small><strong className="calendar-topic"><span className="desktop-topic">{task.topic}</span><span className="mobile-topic">{task.topic.replace(/\s+/g, "").slice(0, 3)}</span></strong></> : null}
               </button>
@@ -990,8 +990,8 @@ function CalendarView({ tasks, activePlan, loading, message, month, progress, ex
   );
 }
 
-function TaskView({ current, nextTask, complete, copied, checks, session, words, sentences, reviewCounts, canImportSummary, warmupAvailable, onOpenWarmup, onOpenPrompt, onOpenChatGPT, onOpenSummary, onAddVocabulary, onAddSentence, onCheck, onNavigate, onBack, backLabel }: {
-  current: CalendarTask; nextTask: CalendarTask | null; complete: boolean; copied: boolean; checks: DailyChecks; session: TrainingSession | null; words: VocabularyItem[]; sentences: SentenceItem[]; reviewCounts: [number, number]; canImportSummary: boolean; warmupAvailable: boolean; onOpenWarmup: () => void; onOpenPrompt: () => void; onOpenChatGPT: () => void; onOpenSummary: () => void; onAddVocabulary: () => void; onAddSentence: () => void; onCheck: (key: CheckKey) => void; onNavigate: (view: View) => void; onBack: () => void; backLabel: string;
+function TaskView({ current, nextTask, complete, copied, checks, session, words, sentences, reviewCounts, summaryTiming, warmupAvailable, onOpenWarmup, onOpenPrompt, onOpenChatGPT, onOpenSummary, onAddVocabulary, onAddSentence, onCheck, onNavigate, onBack, backLabel }: {
+  current: CalendarTask; nextTask: CalendarTask | null; complete: boolean; copied: boolean; checks: DailyChecks; session: TrainingSession | null; words: VocabularyItem[]; sentences: SentenceItem[]; reviewCounts: [number, number]; summaryTiming: "open" | "future" | "closed"; warmupAvailable: boolean; onOpenWarmup: () => void; onOpenPrompt: () => void; onOpenChatGPT: () => void; onOpenSummary: () => void; onAddVocabulary: () => void; onAddSentence: () => void; onCheck: (key: CheckKey) => void; onNavigate: (view: View) => void; onBack: () => void; backLabel: string;
 }) {
   const stage = (current.day ?? 1) <= 15 ? "第一阶段 · 高频生活" : (current.day ?? 1) <= 25 ? "第二阶段 · 社会生活" : "第三阶段 · 软件互联网工作";
   const focus = current.content?.scenes?.map((scene) => scene.title).filter((title): title is string => Boolean(title)).slice(0, 4) ?? [];
@@ -1021,8 +1021,9 @@ function TaskView({ current, nextTask, complete, copied, checks, session, words,
       <button className="back-link" onClick={onBack}>← <span className="back-link-prefix">返回</span><span className="back-link-label">{backLabel}</span></button>
       <section className="task-header">
         <div><span className="eyebrow">{stage}</span><h1>Day {current.day} <span>{current.topic}</span></h1><p>围绕「{current.topic}」完成多个真实场景的日语口语训练。</p></div>
-        <div className={`status-pill ${complete ? "complete" : ""}`}>{complete ? "已完成" : "今日任务"}</div>
+        <div className={`status-pill ${complete ? "complete" : summaryTiming === "future" ? "preview" : ""}`}>{complete ? "已完成" : summaryTiming === "open" ? "今日任务" : "任务预览"}</div>
       </section>
+      {summaryTiming === "future" && <p className="task-preview-note">可提前查看任务详情、预热内容和训练提示；打卡与总结请在对应训练日进行。</p>}
       <section className="task-layout">
         <div className="task-main">
           <article className="card live-card">
@@ -1032,17 +1033,17 @@ function TaskView({ current, nextTask, complete, copied, checks, session, words,
             </div>
           </article>
           <article className="card import-card">
-            <div className="card-number">02</div><div className="card-body"><span className="eyebrow">After live</span><h2>导入训练总结</h2><p>结束 Voice 后，复制 ChatGPT 生成的 JSON 总结，交给 JSOS 更新学习档案。</p><button className="button primary summary-import-button" disabled={!canImportSummary} onClick={onOpenSummary}>{canImportSummary ? (complete ? "重新导入训练总结" : "粘贴训练总结") : "已超过提交时间"}</button><small className="summary-update-note">{canImportSummary ? "当天可多次练习并更新；凌晨 1:00 后关闭提交。" : "该任务的总结提交已于凌晨 1:00 关闭。"}</small></div>
+            <div className="card-number">02</div><div className="card-body"><span className="eyebrow">After live</span><h2>导入训练总结</h2><p>结束 Voice 后，复制 ChatGPT 生成的 JSON 总结，交给 JSOS 更新学习档案。</p><button className="button primary summary-import-button" disabled={summaryTiming !== "open"} onClick={onOpenSummary}>{summaryTiming === "open" ? (complete ? "重新导入训练总结" : "粘贴训练总结") : summaryTiming === "future" ? "尚未到提交日期" : "已超过提交时间"}</button><small className="summary-update-note">{summaryTiming === "open" ? "当天可多次练习并更新；凌晨 1:00 后关闭提交。" : summaryTiming === "future" ? "到对应训练日后开放总结提交。" : "该任务的总结提交已于凌晨 1:00 关闭。"}</small></div>
           </article>
           {complete && session && <ScoreSummary session={session} words={words} sentences={sentences} onAddVocabulary={onAddVocabulary} onAddSentence={onAddSentence} />}
         </div>
         <aside className="task-aside">
           <article className="side-card"><span className="eyebrow">Review</span><h3>昨日复习</h3><p>{reviewCounts[0]} 个单词 · {reviewCounts[1]} 个句子</p><button onClick={() => onNavigate("review")}>开始复习 <span>→</span></button></article>
           <article className="side-card checklist"><span className="eyebrow">Daily rhythm</span><h3>当日其他训练 <span className="checklist-note">（打卡用，不影响任务完成）</span></h3>
-            <CheckRow label="当日 Anki" checked={checks.anki} onClick={() => onNavigate("anki")} />
-            <CheckRow label="当日 Shadowing" checked={checks.shadowing} onClick={() => onCheck("shadowing")} />
-            <CheckRow label="当日独白" checked={checks.monologue} onClick={() => onCheck("monologue")} />
-            <CheckRow label="当日写作" checked={checks.writing} onClick={() => onCheck("writing")} />
+            <CheckRow label="当日 Anki" checked={checks.anki} disabled={summaryTiming !== "open"} onClick={() => onNavigate("anki")} />
+            <CheckRow label="当日 Shadowing" checked={checks.shadowing} disabled={summaryTiming !== "open"} onClick={() => onCheck("shadowing")} />
+            <CheckRow label="当日独白" checked={checks.monologue} disabled={summaryTiming !== "open"} onClick={() => onCheck("monologue")} />
+            <CheckRow label="当日写作" checked={checks.writing} disabled={summaryTiming !== "open"} onClick={() => onCheck("writing")} />
           </article>
           <article className="side-card next-card"><span className="eyebrow">Next</span><h3>推荐安排</h3><strong>{nextTask ? `Day ${nextTask.day} · ${nextTask.topic}` : "当前计划最后一天"}</strong><p>系统会在北京时间凌晨 1:00 根据本次结果重新确认。</p><button>调整日期</button></article>
         </aside>
@@ -1061,8 +1062,8 @@ function ScoreSummary({ session, words, sentences, onAddVocabulary, onAddSentenc
   return <section className="card score-card"><div className="score-heading"><div><span className="eyebrow">Session summary</span><h2>本次训练表现</h2></div><strong className={`goal-status ${goalStatus.className}`}>{goalStatus.label}</strong></div><div className="score-grid">{scores.map(([label, score]) => <div key={label}><span>{label}</span><strong>{score ?? "—"}<small>/5</small></strong><i><b style={{ width: `${(score ?? 0) * 20}%` }} /></i></div>)}</div><div className="summary-note"><strong>{session.needs_reinforcement ? "建议补强" : "今日总结"}</strong><p>{session.summary_zh || session.recommendation?.reasonZh || "总结已导入。"}</p></div><div className="summary-records"><div><div className="summary-record-heading"><strong>本次单词 · {words.length}</strong><button type="button" onClick={onAddVocabulary}>＋ 添加单词</button></div>{words.length ? <ul>{words.map((item) => <li key={item.id}><b>{item.word}</b><span>{item.reading}</span><small>{item.meaning}</small>{item.source === "用户记录" && <small>来自 · 用户记录</small>}</li>)}</ul> : <p>本次没有新增单词。</p>}</div><div><div className="summary-record-heading"><strong>本次句子 · {sentences.length}</strong><button type="button" onClick={onAddSentence}>＋ 添加句子</button></div>{sentences.length ? <ul>{sentences.map((item) => <li key={item.id}>{item.source !== "用户记录" && <span className="old-sentence">{item.original}</span>}<b>{item.corrected}</b>{(item.source === "用户记录" ? item.meaning : item.note) && <small>{item.source === "用户记录" ? item.meaning : item.note}</small>}{item.source === "用户记录" && <small>来自 · 用户记录</small>}</li>)}</ul> : <p>本次没有新增句子。</p>}</div></div></section>;
 }
 
-function CheckRow({ label, checked, onClick }: { label: string; checked: boolean; onClick: () => void }) {
-  return <button className="check-row" onClick={onClick}><span className={checked ? "check checked" : "check"}>{checked ? "✓" : ""}</span><strong>{label}</strong><small>{checked ? "已完成" : "待完成"}</small></button>;
+function CheckRow({ label, checked, disabled = false, onClick }: { label: string; checked: boolean; disabled?: boolean; onClick: () => void }) {
+  return <button className="check-row" disabled={disabled} onClick={onClick}><span className={checked ? "check checked" : "check"}>{checked ? "✓" : ""}</span><strong>{label}</strong><small>{disabled ? "当天开放" : checked ? "已完成" : "待完成"}</small></button>;
 }
 
 function WarmupView({ topic, warmup, onBack, backLabel }: { topic: string; warmup: WarmupSet | null; onBack: () => void; backLabel: string }) {
