@@ -2,7 +2,8 @@ export type ServerConfig = {
   supabaseUrl: string;
   supabaseAnonKey: string;
   supabaseServiceRoleKey: string;
-  openAiApiKey: string;
+  geminiServiceUrl: string;
+  geminiServiceToken: string;
 };
 
 export function getServerConfig(): ServerConfig {
@@ -10,7 +11,8 @@ export function getServerConfig(): ServerConfig {
     supabaseUrl: process.env.NEXT_PUBLIC_SUPABASE_URL ?? "",
     supabaseAnonKey: process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? "",
     supabaseServiceRoleKey: process.env.SUPABASE_SERVICE_ROLE_KEY ?? "",
-    openAiApiKey: process.env.OPENAI_API_KEY ?? "",
+    geminiServiceUrl: process.env.GEMINI_SERVICE_URL ?? "",
+    geminiServiceToken: process.env.GEMINI_SERVICE_TOKEN ?? "",
   };
 }
 

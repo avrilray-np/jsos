@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { parseSummaryText, SummaryParseError, validateSummary } from "../lib/jsos-domain";
+import { getBeijingCalendarDate } from "../lib/plan-generation";
 import { getJsosTrainingDate, getPreviousTrainingDate, millisecondsUntilNextTrainingDay } from "../lib/training-day";
 import { getWarmupSet, type WarmupSet } from "../lib/warmup-content";
 
@@ -15,7 +16,7 @@ type CalendarTask = {
   topic?: string;
   status: TaskStatus;
   kind?: "core" | "reinforcement";
-  content?: { stableKey?: string; scenes?: Array<{ key?: string; title?: string; goals?: string[]; roles?: string[] }>; targetPatterns?: string[]; basePrompt?: string | null };
+  content?: { stableKey?: string; generationState?: "pending" | "generating" | "completed" | "failed"; generationErrorCode?: string; manualRetryCount?: number; scenes?: Array<{ key?: string; title?: string; goals?: string[]; roles?: string[] }>; targetPatterns?: string[]; basePrompt?: string | null; warmup?: Array<{ promptZh: string; answerJa: string }> };
 };
 
 type VocabularyItem = { id: string; word: string; reading: string; meaning: string; state: "生词" | "熟词"; source: string; sourceTaskId: string | null; sessionIds: string[] };
@@ -28,6 +29,16 @@ type TrainingSession = { id: string; task_id: string; duration_minutes: number |
 type ReviewRecords = { vocabularyIds: string[]; sentenceIds: string[] };
 type SessionUser = { email: string; isAdmin: boolean; passwordPromptPending: boolean };
 type SettingsPage = "account" | "plan";
+type PlanDraft = {
+  id: string;
+  learning_goal: string;
+  day_count: number;
+  status: "generating_topics" | "topics_ready" | "topics_confirmed" | "generation_failed";
+  topic_attempt_count: number;
+  topic_generation_started_at: string;
+  error_code: string | null;
+  topics: Array<{ day_number: number; topic: string | null; status: "pending" | "generating" | "completed" | "failed"; error_code: string | null }>;
+};
 
 const VALID_VIEWS: View[] = ["calendar", "task", "vocabulary", "sentences", "anki", "review", "warmup"];
 const VIEW_STORAGE_KEY = "jsos-current-view";
@@ -95,6 +106,19 @@ export default function Home() {
   const [planKind, setPlanKind] = useState<"trial" | "official">("trial");
   const [planStartDate, setPlanStartDate] = useState("");
   const [planMessage, setPlanMessage] = useState("");
+  const [planDraft, setPlanDraft] = useState<PlanDraft | null>(null);
+  const [planDraftLoading, setPlanDraftLoading] = useState(false);
+  const [planGoal, setPlanGoal] = useState("");
+  const [planDayCount, setPlanDayCount] = useState(30);
+  const [customPlanDays, setCustomPlanDays] = useState("");
+  const [planDraftSaving, setPlanDraftSaving] = useState(false);
+  const [topicConfirmOpen, setTopicConfirmOpen] = useState(false);
+  const [activationOpen, setActivationOpen] = useState(false);
+  const [editingTopicDay, setEditingTopicDay] = useState<number | null>(null);
+  const [editingTopicValue, setEditingTopicValue] = useState("");
+  const [topicClock, setTopicClock] = useState(() => Date.now());
+  const topicDraftId = planDraft?.id;
+  const topicDraftStatus = planDraft?.status;
   const [recordKind, setRecordKind] = useState<UserRecordKind | null>(null);
   const [recordValue, setRecordValue] = useState("");
   const [recordReading, setRecordReading] = useState("");
@@ -185,6 +209,18 @@ export default function Home() {
     if (calendarMonth) window.sessionStorage.setItem(MONTH_STORAGE_KEY, calendarMonth);
   }, [calendarMonth, selectedTaskId, view]);
 
+  useEffect(() => {
+    if (!topicConfirmOpen || !topicDraftId) return;
+    const clock = window.setInterval(() => setTopicClock(Date.now()), 1_000);
+    const poll = topicDraftStatus === "generating_topics"
+      ? window.setInterval(() => void loadPlanDraft(), 2_500)
+      : 0;
+    return () => {
+      window.clearInterval(clock);
+      if (poll) window.clearInterval(poll);
+    };
+  }, [topicConfirmOpen, topicDraftId, topicDraftStatus]);
+
   const current = useMemo(() => {
     const today = getJsosTrainingDate();
     return tasks.find((task) => task.taskId === selectedTaskId) ?? tasks.find((task) => task.date === today) ?? tasks.find((task) => task.status === "planned") ?? null;
@@ -194,7 +230,11 @@ export default function Home() {
   const currentChecks = current ? checkins[current.date] ?? { anki: false, shadowing: false, monologue: false, writing: false } : { anki: false, shadowing: false, monologue: false, writing: false };
   const currentWords = current ? vocabulary.filter((item) => item.sourceTaskId === current.taskId || Boolean(currentSession && item.sessionIds.includes(currentSession.id))) : [];
   const currentSentences = current ? sentences.filter((item) => item.sourceTaskId === current.taskId || Boolean(currentSession && item.sessionId === currentSession.id)) : [];
-  const currentWarmup = getWarmupSet(current?.content?.stableKey);
+  const generatedWarmup = current?.content?.warmup?.length === 10 ? {
+    title: current.topic ?? "今日主题",
+    items: current.content.warmup.map((item) => ({ ...item, answerParts: [{ text: item.answerJa }] })),
+  } satisfies WarmupSet : null;
+  const currentWarmup = generatedWarmup ?? getWarmupSet(current?.content?.stableKey);
   const reviewDate = current ? getPreviousTrainingDate(current.date) : "";
   const yesterdayReview = reviewByDate[reviewDate] ?? { vocabularyIds: [], sentenceIds: [] };
   const reviewWords = useMemo(() => {
@@ -214,11 +254,22 @@ export default function Home() {
     ? `Day ${current.day} ${current.topic}`
     : backLabel;
   const completed = tasks.filter((task) => task.status === "done").length;
-  const progress = Math.round((completed / 40) * 100);
+  const coreTaskCount = tasks.filter((task) => task.kind !== "reinforcement").length || 40;
+  const progress = Math.min(100, Math.round((completed / coreTaskCount) * 100));
   const vocabularyNewCount = vocabulary.filter((item) => item.state === "生词").length;
   const vocabularyKnownCount = vocabulary.filter((item) => item.state === "熟词").length;
   const sentenceLearningCount = sentences.filter((item) => item.state === "待掌握").length;
   const sentenceMasteredCount = sentences.filter((item) => item.state === "已掌握").length;
+  const topicGenerationInterrupted = Boolean(
+    planDraft
+    && (planDraft.status === "generating_topics" || planDraft.status === "generation_failed")
+    && topicClock - Date.parse(planDraft.topic_generation_started_at) >= 60_000,
+  );
+  const planTopicsReady = Boolean(
+    planDraft?.status === "topics_ready"
+    && planDraft.topics.length === planDraft.day_count
+    && planDraft.topics.every((topic) => topic.status === "completed" && topic.topic),
+  );
 
   async function loadDashboard(redirectOnUnauthorized = true): Promise<"ok" | "unauthorized" | "error"> {
     setDashboardLoading(true);
@@ -334,6 +385,26 @@ export default function Home() {
     }
   }
 
+  async function loadPlanDraft() {
+    setPlanDraftLoading(true);
+    try {
+      const response = await fetch("/api/plan-drafts", { cache: "no-store" });
+      const data = await response.json() as { ok?: boolean; draft?: PlanDraft | null; message?: string };
+      if (response.status === 401) {
+        window.location.replace("/login");
+        return null;
+      }
+      if (!response.ok || !data.ok) throw new Error(data.message ?? "读取计划草稿失败");
+      setPlanDraft(data.draft ?? null);
+      return data.draft ?? null;
+    } catch (error) {
+      setPlanMessage(error instanceof Error ? error.message : "读取计划草稿失败");
+      return null;
+    } finally {
+      setPlanDraftLoading(false);
+    }
+  }
+
   function openAccountSettings() {
     setSettingsPage("account");
     setPlanFormExpanded(false);
@@ -345,39 +416,114 @@ export default function Home() {
     setSettingsPage("plan");
     setPlanFormExpanded(false);
     setSettingsOpen(true);
-    if (!planStartDate) setPlanStartDate(getJsosTrainingDate());
-    void loadPlans();
+    if (!planStartDate) setPlanStartDate(getBeijingCalendarDate());
+    void Promise.all([loadPlans(), loadPlanDraft()]);
   }
 
-  async function createPlan() {
-    if (!planStartDate) {
-      setPlanMessage("请先选择起始日期");
-      return;
+  async function postPlanDraft(action: string, values: Record<string, unknown> = {}) {
+    const response = await fetch("/api/plan-drafts", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action, ...values }),
+    });
+    const data = await response.json() as { ok?: boolean; draft?: PlanDraft | null; message?: string };
+    if (response.status === 401) {
+      window.location.replace("/login");
+      return null;
     }
-    const activePlan = plans.find((plan) => plan.status === "active");
-    if (activePlan && !window.confirm(`当前${activePlan.kind === "trial" ? "试运行" : "正式"}计划将被归档，确定继续吗？`)) return;
-    setPlansLoading(true);
+    if (!response.ok || !data.ok) throw new Error(data.message ?? "操作失败，请稍后重试");
+    if ("draft" in data) setPlanDraft(data.draft ?? null);
+    return data;
+  }
+
+  async function runTopicGeneration(draftId: string) {
+    try {
+      await postPlanDraft("run_topics", { draftId });
+    } catch (error) {
+      setPlanMessage(error instanceof Error ? error.message : "主题生成暂时中断");
+    }
+  }
+
+  async function generatePlanTopics() {
+    const dayCount = customPlanDays ? Number(customPlanDays) : planDayCount;
+    setPlanDraftSaving(true);
     setPlanMessage("");
     try {
-      const response = await fetch("/api/plans", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ kind: planKind, startsOn: planStartDate }),
-      });
-      const data = await response.json() as { ok?: boolean; message?: string };
-      if (response.status === 401) {
-        window.location.replace("/login");
-        return;
-      }
-      if (!response.ok || !data.ok) throw new Error(data.message ?? "创建训练计划失败");
-      const successMessage = data.message ?? "训练计划已创建";
-      await Promise.all([loadPlans(), loadDashboard()]);
+      const data = await postPlanDraft("generate", { learningGoal: planGoal, dayCount });
+      if (!data?.draft) throw new Error("计划草稿创建失败");
+      setTopicClock(Date.now());
+      setSettingsOpen(false);
+      setTopicConfirmOpen(true);
+      void runTopicGeneration(data.draft.id);
+    } catch (error) {
+      setPlanMessage(error instanceof Error ? error.message : "计划草稿创建失败");
+    } finally {
+      setPlanDraftSaving(false);
+    }
+  }
+
+  async function retryPlanTopics() {
+    if (!planDraft) return;
+    setPlanDraftSaving(true);
+    setPlanMessage("");
+    try {
+      const data = await postPlanDraft("retry", { draftId: planDraft.id });
+      if (!data?.draft) throw new Error("重新生成失败");
+      setTopicClock(Date.now());
+      void runTopicGeneration(data.draft.id);
+    } catch (error) {
+      setPlanMessage(error instanceof Error ? error.message : "重新生成失败");
+    } finally {
+      setPlanDraftSaving(false);
+    }
+  }
+
+  async function savePlanTopic(dayNumber: number) {
+    if (!planDraft) return;
+    setPlanDraftSaving(true);
+    setPlanMessage("");
+    try {
+      await postPlanDraft("update_topic", { draftId: planDraft.id, dayNumber, topic: editingTopicValue });
+      setEditingTopicDay(null);
+      setEditingTopicValue("");
+    } catch (error) {
+      setPlanMessage(error instanceof Error ? error.message : "主题修改失败");
+    } finally {
+      setPlanDraftSaving(false);
+    }
+  }
+
+  async function confirmPlanTopics() {
+    if (!planDraft) return;
+    setPlanDraftSaving(true);
+    setPlanMessage("");
+    try {
+      await postPlanDraft("confirm", { draftId: planDraft.id });
+      setTopicConfirmOpen(false);
+      setPlanStartDate(getBeijingCalendarDate());
+      setActivationOpen(true);
+    } catch (error) {
+      setPlanMessage(error instanceof Error ? error.message : "确认主题失败");
+    } finally {
+      setPlanDraftSaving(false);
+    }
+  }
+
+  async function activatePlanDraft() {
+    if (!planDraft) return;
+    setPlanDraftSaving(true);
+    setPlanMessage("");
+    try {
+      const data = await postPlanDraft("activate", { draftId: planDraft.id, kind: planKind, startsOn: planStartDate });
+      setPlanDraft(null);
+      setActivationOpen(false);
       setPlanFormExpanded(false);
-      setPlanMessage(successMessage);
+      setPlanMessage(data?.message ?? "训练计划已创建");
+      await Promise.all([loadPlans(), loadDashboard()]);
     } catch (error) {
       setPlanMessage(error instanceof Error ? error.message : "创建训练计划失败");
     } finally {
-      setPlansLoading(false);
+      setPlanDraftSaving(false);
     }
   }
 
@@ -515,6 +661,25 @@ export default function Home() {
 
   function openTask(task: CalendarTask) {
     if (!task.taskId || (task.status !== "today" && task.status !== "done")) return;
+    if (task.content?.generationState === "failed") {
+      const nextRetryCount = (task.content.manualRetryCount ?? 0) + 1;
+      setTasks((items) => items.map((item) => item.taskId === task.taskId ? {
+        ...item,
+        content: { ...item.content, generationState: "generating", manualRetryCount: nextRetryCount },
+      } : item));
+      void fetch("/api/plan-generation", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ taskId: task.taskId }),
+      }).then(async (response) => {
+        const data = await response.json() as { ok?: boolean; message?: string };
+        if (!response.ok || !data.ok) throw new Error(data.message ?? "重新生成失败");
+        notify(data.message ?? (nextRetryCount > 1 ? "再次生成中" : "主题生成中"));
+      }).catch((error) => {
+        notify(error instanceof Error ? error.message : "重新生成失败");
+        void loadDashboard();
+      });
+    }
     setSelectedTaskId(task.taskId);
     setTaskComplete(task.status === "done");
     setSummaryOpen(false);
@@ -635,25 +800,93 @@ export default function Home() {
             </> : (() => {
               const currentPlan = plans.find((plan) => plan.status === "active");
               const archivedCount = plans.filter((plan) => plan.status === "archived").length;
-              const showPlanForm = planFormExpanded || (!plansLoading && !currentPlan);
+              const showPlanForm = !planDraft && !planDraftLoading && (planFormExpanded || (!plansLoading && !currentPlan));
               return <>
                 <div className="plan-status">
                   <strong>当前计划</strong>
                   {plansLoading && plans.length === 0 ? <p>正在读取…</p> : currentPlan ? <p>{currentPlan.kind === "trial" ? "试运行" : "正式训练"} · {currentPlan.starts_on} 开始</p> : <p>尚未创建训练计划</p>}
                   {archivedCount > 0 && <small>已归档 {archivedCount} 个旧计划</small>}
                 </div>
-                {currentPlan && !planFormExpanded && <button className="button plan-recreate-button" type="button" onClick={() => { setPlanFormExpanded(true); setPlanMessage(""); }}>重新创建计划</button>}
-                {showPlanForm && <div className="plan-form">
-                  <label>计划类型<select value={planKind} onChange={(event) => setPlanKind(event.target.value as "trial" | "official")}><option value="trial">试运行</option><option value="official">正式训练</option></select></label>
-                  <label>Day 1 日期<input type="date" value={planStartDate} onChange={(event) => setPlanStartDate(event.target.value)} /></label>
+                {planDraftLoading && <p className="settings-note">正在读取计划草稿…</p>}
+                {planDraft && <div className="draft-resume-card">
+                  <div><strong>{planDraft.status === "topics_confirmed" ? "主题已确认" : "已有未完成的计划草稿"}</strong><small>{planDraft.day_count} 天 · {planDraft.learning_goal}</small></div>
+                  <button className="button primary" type="button" onClick={() => {
+                    setSettingsOpen(false);
+                    if (planDraft.status === "topics_confirmed") {
+                      setPlanStartDate(getBeijingCalendarDate());
+                      setActivationOpen(true);
+                    } else {
+                      setTopicClock(Date.now());
+                      setTopicConfirmOpen(true);
+                      if (planDraft.status === "generating_topics") void runTopicGeneration(planDraft.id);
+                    }
+                  }}>{planDraft.status === "topics_confirmed" ? "现在开启计划" : "继续确认主题"}</button>
                 </div>}
-                <p className="settings-note">创建新计划会安全归档当前计划。课程模板保留，旧计划不会参与新计划统计。</p>
+                {currentPlan && !planFormExpanded && !planDraft && <button className="button plan-recreate-button" type="button" onClick={() => { setPlanFormExpanded(true); setPlanMessage(""); }}>重新创建计划</button>}
+                {showPlanForm && <div className="draft-form">
+                  <label><span>学习目的</span><textarea maxLength={1000} value={planGoal} onChange={(event) => { setPlanGoal(event.target.value); setPlanMessage(""); }} placeholder="例如：赴日读计算机专业，同时需要应对日常打工和交友" /></label>
+                  <fieldset><legend>训练天数</legend><div className="plan-day-options">
+                    {[7, 30, 60].map((days) => <button key={days} type="button" className={!customPlanDays && planDayCount === days ? "active" : ""} onClick={() => { setPlanDayCount(days); setCustomPlanDays(""); }}>{days} 天</button>)}
+                    <button type="button" className={customPlanDays ? "active" : ""} onClick={() => { setPlanDayCount(0); setCustomPlanDays(customPlanDays || "14"); }}>其他</button>
+                  </div>{customPlanDays && <input type="number" min="1" max="90" value={customPlanDays} onChange={(event) => setCustomPlanDays(event.target.value)} aria-label="自定义训练天数" />}</fieldset>
+                  <button className="button primary generate-topics-button" disabled={planDraftSaving} type="button" onClick={() => void generatePlanTopics()}>{planDraftSaving ? "正在生成…" : "生成主题"}</button>
+                </div>}
+                {(currentPlan || planFormExpanded) && <p className="settings-note">创建新计划会安全归档当前计划。课程模板保留，旧计划不会参与新计划统计。</p>}
                 {planMessage && <div className={planMessage.includes("已创建") ? "message success" : "message"}>{planMessage}</div>}
-                {showPlanForm && <div className="modal-actions settings-actions plan-settings-actions">
-                  <button className="button primary" disabled={plansLoading} onClick={createPlan}>{plansLoading ? "处理中…" : "创建计划"}</button>
-                </div>}
               </>;
             })()}
+          </section>
+        </div>
+      )}
+      {topicConfirmOpen && planDraft && (
+        <div className="modal-backdrop" role="presentation" onMouseDown={() => setTopicConfirmOpen(false)}>
+          <section className="modal topic-confirm-modal" role="dialog" aria-modal="true" aria-labelledby="topic-confirm-title" onMouseDown={(event) => event.stopPropagation()}>
+            <div className="modal-heading">
+              <div><span className="eyebrow">Step 1</span><h2 id="topic-confirm-title">{topicGenerationInterrupted ? "主题生成暂时中断" : "请确认如下主题"}</h2></div>
+              <button className="icon-button" onClick={() => setTopicConfirmOpen(false)} aria-label="关闭">×</button>
+            </div>
+            {topicGenerationInterrupted ? <div className="interrupted-generation">
+              <button className="button primary" disabled={planDraftSaving} onClick={() => void retryPlanTopics()}>{planDraftSaving ? "处理中…" : "重新生成"}</button>
+            </div> : <>
+              <p className="topic-dialog-note">主题生成完成后可以逐项修改；日期会在开启计划时确定。</p>
+              {!planTopicsReady && <div className="topic-progress" role="progressbar" aria-label="主题生成进度"><span /></div>}
+              <div className="topic-confirm-list">
+                {planDraft.topics.map((item) => <div className="topic-confirm-row" key={item.day_number}>
+                  <strong>Day {item.day_number}</strong>
+                  {editingTopicDay === item.day_number ? <>
+                    <input autoFocus maxLength={120} value={editingTopicValue} onChange={(event) => setEditingTopicValue(event.target.value)} />
+                    <button type="button" disabled={planDraftSaving} onClick={() => void savePlanTopic(item.day_number)}>保存</button>
+                  </> : <>
+                    <span>{item.status === "completed" && item.topic ? item.topic : "生成中"}</span>
+                    {item.status === "completed" && item.topic && <button type="button" aria-label={`修改 Day ${item.day_number} 主题`} onClick={() => { setEditingTopicDay(item.day_number); setEditingTopicValue(item.topic ?? ""); }}>✎</button>}
+                  </>}
+                </div>)}
+              </div>
+              {planMessage && <div className="message">{planMessage}</div>}
+              <div className="modal-actions">
+                <button className="button primary" disabled={!planTopicsReady || planDraftSaving || editingTopicDay !== null} onClick={() => void confirmPlanTopics()}>{planDraftSaving ? "处理中…" : "确认主题"}</button>
+              </div>
+            </>}
+          </section>
+        </div>
+      )}
+      {activationOpen && planDraft && (
+        <div className="modal-backdrop" role="presentation" onMouseDown={() => setActivationOpen(false)}>
+          <section className="modal activation-modal" role="dialog" aria-modal="true" aria-labelledby="activation-title" onMouseDown={(event) => event.stopPropagation()}>
+            <div className="modal-heading">
+              <div><span className="eyebrow">Step 2</span><h2 id="activation-title">现在开启计划</h2></div>
+              <button className="icon-button" onClick={() => setActivationOpen(false)} aria-label="关闭">×</button>
+            </div>
+            <p>完整每日任务会在后台继续生成；计划创建后可以立即查看全部日期和主题。</p>
+            <div className="plan-form">
+              <label>计划类型<select value={planKind} onChange={(event) => setPlanKind(event.target.value as "trial" | "official")}><option value="trial">试运行</option><option value="official">正式计划</option></select></label>
+              <label>Day 1 日期<input type="date" min={getBeijingCalendarDate()} value={planStartDate} onChange={(event) => setPlanStartDate(event.target.value)} /></label>
+            </div>
+            {planMessage && <div className="message">{planMessage}</div>}
+            <div className="modal-actions activation-actions">
+              <button className="button secondary" disabled={planDraftSaving} onClick={() => setActivationOpen(false)}>暂不创建</button>
+              <button className="button primary" disabled={planDraftSaving} onClick={() => void activatePlanDraft()}>{planDraftSaving ? "处理中…" : "创建计划"}</button>
+            </div>
           </section>
         </div>
       )}
@@ -714,7 +947,7 @@ function CalendarView({ tasks, activePlan, loading, message, month, progress, ex
   return (
     <div className="page calendar-page">
       <section className="hero-row">
-        <div><span className="eyebrow">60 天口语计划 · 第一阶段</span><h1 className="hero-title">JSOS——你的日语陪练。</h1><p>今天不是赶进度，而是把薄弱的地方真正练会。</p></div>
+        <div><span className="eyebrow">{tasks.length ? `${tasks.length} 天口语计划` : "专属口语计划"} · 第一阶段</span><h1 className="hero-title">JSOS——你的日语陪练。</h1><p>今天不是赶进度，而是把薄弱的地方真正练会。</p></div>
         <div className="progress-card">
           <div className="progress-ring" style={{ "--progress": `${progress * 3.6}deg` } as React.CSSProperties}><strong>{progress}%</strong><span>总体进度</span></div>
           <div><small>已完成</small><strong>{tasks.filter((task) => task.status === "done").length} 天</strong><small>累计表达</small><strong>{expressionCount} 句</strong></div>
@@ -726,7 +959,7 @@ function CalendarView({ tasks, activePlan, loading, message, month, progress, ex
           <div className="calendar-actions"><button onClick={() => moveMonth(-1)} aria-label="上个月">←</button><button onClick={() => moveMonth(1)} aria-label="下个月">→</button></div>
           <div className="legend"><span><i className="dot done" />已完成</span><span><i className="dot today" />今天</span><span><i className="dot reinforcement" />补强</span><span><i className="dot deferred" />已顺延</span></div>
         </div>
-        {!activePlan ? <div className="empty-plan"><strong>{loading ? "正在读取训练计划…" : "尚未开启计划"}</strong><p>{message || "创建试运行或正式计划后，Day 1～40 会按起始日期自动排入日历。"}</p>{!loading && <button className="button primary" onClick={onOpenSettings}>开启训练计划</button>}</div> : <>
+        {!activePlan ? <div className="empty-plan"><strong>{loading ? "正在读取训练计划…" : "尚未开启计划"}</strong><p>{message || "生成并确认主题后，全部训练日会按 Day 1 起始日期自动排入日历。"}</p>{!loading && <button className="button primary" onClick={onOpenSettings}>开启训练计划</button>}</div> : <>
         <div className="weekdays">{["一", "二", "三", "四", "五", "六", "日"].map((day) => <span key={day}>周{day}</span>)}</div>
         <div className="calendar-grid">
           {Array.from({ length: cellCount }, (_, index) => {
@@ -762,6 +995,27 @@ function TaskView({ current, nextTask, complete, copied, checks, session, words,
 }) {
   const stage = (current.day ?? 1) <= 15 ? "第一阶段 · 高频生活" : (current.day ?? 1) <= 25 ? "第二阶段 · 社会生活" : "第三阶段 · 软件互联网工作";
   const focus = current.content?.scenes?.map((scene) => scene.title).filter((title): title is string => Boolean(title)).slice(0, 4) ?? [];
+  if (current.content?.generationState && current.content.generationState !== "completed") {
+    const generationState = current.content.generationState;
+    const retryCount = current.content.manualRetryCount ?? 0;
+    const generationTitle = generationState === "failed"
+      ? "暂时无法生成，请稍后点击主题重试"
+      : generationState === "generating" && retryCount > 1
+        ? "再次生成中"
+        : generationState === "generating"
+          ? "主题生成中"
+          : "任务内容生成中，预计 5 分钟后可用";
+    return <div className="page narrow-page">
+      <button className="back-link" onClick={onBack}>← <span className="back-link-prefix">返回</span><span className="back-link-label">{backLabel}</span></button>
+      <section className="generation-wait-card">
+        <span className="eyebrow">Day {current.day}</span>
+        <h1>{current.topic}</h1>
+        <strong>{generationTitle}</strong>
+        <p>{generationState === "failed" ? "点击日历中的当天主题即可重新发起生成。" : "日期和主题已经确定。完整训练场景、目标表达、训练提示和预热内容会在后台继续生成。"}</p>
+        {generationState === "failed" && current.content.generationErrorCode && <button className="generation-error-code" type="button" onClick={() => void navigator.clipboard.writeText(current.content?.generationErrorCode ?? "")}>复制错误编号</button>}
+      </section>
+    </div>;
+  }
   return (
     <div className="page narrow-page">
       <button className="back-link" onClick={onBack}>← <span className="back-link-prefix">返回</span><span className="back-link-label">{backLabel}</span></button>
